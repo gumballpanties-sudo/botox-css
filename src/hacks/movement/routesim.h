@@ -128,6 +128,9 @@ struct World
     bool  floor = false;  float floorEff = 0.f;
     bool  ceil = false;   float ceilEff = 0.f;
     bool  floorPlayer = false;  // the floor is a player: dih's traces (TraceFilterWorldProps) skip it
+    // hull standing still: WalkMove returns at spd < 1 BEFORE StayOnGround (gamemovement.cpp
+    // WalkMove), so a grounded hover 0..2u over the floor is never snapped (routecalc engine check)
+    bool  still = false;
 };
 
 struct Cmd { bool jump = false, duck = false; };
@@ -197,7 +200,7 @@ inline bool OverFloor(const State& s, const World& w) { return w.floor && s.z >=
 inline void Categorize(State& s, const World& w)
 {
     if (s.vz > kNonJumpVz) { SetGround(s, false); return; }
-    const bool moveToEnd = s.ground;
+    const bool moveToEnd = s.ground && !w.still;   // StayOnGround only runs for a moving hull
     const float end = s.z - (2.f + (moveToEnd ? kStepSize : 0.f));
     if (OverFloor(s, w) && end < w.floorEff)
     {

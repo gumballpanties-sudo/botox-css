@@ -135,83 +135,6 @@ static bool PsWallTouch(void* pLocal, Vec3& normal, const Vec3& from)
 }
 static bool PsWallTouch(void* pLocal, Vec3& normal) { return PsWallTouch(pLocal, normal, EntV3(pLocal, g_offOrigin)); }
 
-// pixel surf vs texture bug: both pin vz, but a pixel surf's clip is a brush TOP plane the hull sweep
-// crosses while pressed flush on face n (see Mechanism below), and CategorizePosition's 2u down trace from
-// 1/32 off the face misses it. A texture bug is a press on a plain face: no such plane on the fall.
-// PsAhead answers "about to fall on a pixel surf" from geometry, not from a re-flown fall: the catch is
-// ulp-exact (PSA needs ~500 engine sims to land one), so an 8-tick trace fly never hits the top plane and
-// the 20:50 version said no on every surf (log 22:10: ahead=0, AA miss=39, PS notop=54, PSA surf -383.97).
-// Ray straight down the column 0.1u past the face, over the feet range the next `ticks` of fall (+ the 8.5u
-// an air duck / unduck moves the feet) cover:
-//   lip   = hits a top plane (nz > 0.7). From inside the wall brush too: a ray that starts solid and leaves
-//           it reports the next brush's plane (brush seam = the wall's horizontal edge = the surf)
-//   solid = allsolid: one plain brush the whole range = texture bug face, no surf
-//   floor = the same top under the hull side (0.1u off the face) within 1u = a ledge you land on
-// 3 samples along the face (now, half, full along-face travel): a lip that starts further along still reads
-namespace psl { int lip = 0, floor = 0, solid = 0, none = 0, noface = 0; }
-static bool PsAhead(void* pLocal, const Vec3& start, const Vec3& vel0, const Vec3& n, const Vec3& mins,
-                    const Vec3& maxs, int ticks)
-{
-    const auto diag = [](bool r) {
-        static int s_sec = -1;
-        const int sec = g_globalVars ? (int)g_globalVars->curtime : 0;
-        if (g_debugLogEnable && sec != s_sec) {
-            s_sec = sec;
-            if (psl::lip || psl::floor || psl::solid || psl::none || psl::noface)
-                DebugLog("PSL: lip=%d floor=%d solid=%d none=%d noface=%d", psl::lip, psl::floor, psl::solid, psl::none, psl::noface);
-            psl::lip = psl::floor = psl::solid = psl::none = psl::noface = 0;
-        }
-        return r;
-    };
-    const float dt = TickInterval();
-    if (dt <= 0.f) return true;
-    TraceFilterWorldProps fil; fil.Setup(pLocal);
-
-    // hull flush on the face: AA hands a face up to 1u off, PS one 0.05u off
-    GameTrace_t face{};
-    TraceHull(start, start - Vec3(n.x * 2.f, n.y * 2.f, 0.f), mins, maxs, MASK_PLAYERSOLID, &fil, &face);
-    if (!face.startsolid && face.fraction >= 1.f) { ++psl::noface; return diag(false); }
-    const Vec3 contact = face.startsolid ? start : face.endpos;
-
-    // feet z range over the fall (lowest feet), widened by the duck shift: standing can duck up onto a
-    // lip above the feet, ducked can unduck down onto one below the fall
-    const float halfG = -TargetPredictZVel();
-    float z = contact.z, vz = vel0.z, lowest = z;
-    for (int t = 0; t < ticks; t++) { z += (vz - halfG) * dt; vz -= 2.f * halfG; lowest = fminf(lowest, z); }
-    constexpr float k_duckShift = 8.5f;   // CSS air duck feet shift, (62 - 45) / 2
-    const bool  standing = maxs.z - mins.z > 50.f;
-    const float zTop = contact.z + mins.z + 0.5f + (standing ? k_duckShift : 0.f);
-    const float zBot = lowest + mins.z - 0.5f - (standing ? 0.f : k_duckShift);
-
-    const float d = fabsf(n.x) * maxs.x + fabsf(n.y) * maxs.y;   // AABB support toward the face
-    const float vn = vel0.x * n.x + vel0.y * n.y;
-    const Vec3  along(vel0.x - n.x * vn, vel0.y - n.y * vn, 0.f);
-    const float travel = dt * static_cast<float>(ticks);
-    bool solid = false;
-    for (int s = 0; s < 3; s++)
-    {
-        const float f = travel * 0.5f * static_cast<float>(s);
-        const float cx = contact.x + along.x * f, cy = contact.y + along.y * f;
-        GameTrace_t in{};
-        TraceLine(Vec3(cx - n.x * (d + 0.1f), cy - n.y * (d + 0.1f), zTop),
-                  Vec3(cx - n.x * (d + 0.1f), cy - n.y * (d + 0.1f), zBot), MASK_PLAYERSOLID, &fil, &in);
-        if (in.allsolid) { solid = true; continue; }
-        if (in.fraction >= 1.f || in.plane.normal.z <= 0.7f) continue;
-        GameTrace_t out{};
-        TraceLine(Vec3(cx - n.x * (d - 0.1f), cy - n.y * (d - 0.1f), zTop),
-                  Vec3(cx - n.x * (d - 0.1f), cy - n.y * (d - 0.1f), zBot), MASK_PLAYERSOLID, &fil, &out);
-        if (!out.allsolid && out.fraction < 1.f && out.plane.normal.z > 0.7f && fabsf(out.endpos.z - in.endpos.z) < 1.f)
-        {
-            ++psl::floor;
-            return diag(false);
-        }
-        ++psl::lip;
-        return diag(true);
-    }
-    ++(solid ? psl::solid : psl::none);
-    return diag(false);
-}
-
 /* botox movement.cpp:456-475: auto align off = pixel surf finds its own wall ( 16 x 1u hull rays ) */
 static void PsWallDetectFallback(void* pLocal)
 {
@@ -274,8 +197,7 @@ static UserCmd_t PsWithDuck(UserCmd_t c, bool duck)
 // nothing pins, latch / hold / lost = ride caught / kept / dropped
 namespace psd
 {
-    // notop = touching a face with no brush top plane in reach: presses skipped (texture bug, not a surf)
-    enum Out { o_nowall, o_yield, o_budget, o_own, o_miss, o_latch, o_hold, o_lost, o_notop, o_count };
+    enum Out { o_nowall, o_yield, o_budget, o_own, o_miss, o_latch, o_hold, o_lost, o_count };
     int s_outs[o_count] = {};
     static void Count(Out o)
     {
@@ -284,8 +206,8 @@ namespace psd
         const int sec = g_globalVars ? (int)g_globalVars->curtime : 0;
         if (!g_debugLogEnable || sec == s_sec) return;
         s_sec = sec;
-        DebugLog("PS: nowall=%d yield=%d budget=%d own=%d miss=%d latch=%d hold=%d lost=%d notop=%d", s_outs[o_nowall], s_outs[o_yield],
-                 s_outs[o_budget], s_outs[o_own], s_outs[o_miss], s_outs[o_latch], s_outs[o_hold], s_outs[o_lost], s_outs[o_notop]);
+        DebugLog("PS: nowall=%d yield=%d budget=%d own=%d miss=%d latch=%d hold=%d lost=%d", s_outs[o_nowall], s_outs[o_yield],
+                 s_outs[o_budget], s_outs[o_own], s_outs[o_miss], s_outs[o_latch], s_outs[o_hold], s_outs[o_lost]);
         for (int& c : s_outs) c = 0;
     }
 }
@@ -383,16 +305,13 @@ static void PixelSurfImpl(void* pLocal, UserCmd_t* cmd)
         constexpr float k_leaveDot = 0.5f;
         if (len > 0.01f && (wish.x * n.x + wish.y * n.y) / len > k_leaveDot)
             return 0;
-        // not about to fall on a pixel surf = any pin a press finds is a texture bug: your keys only
-        if (!PsAhead(pLocal, EntV3(pLocal, g_offOrigin), s_prePredVel, n, EntV3(pLocal, g_offMins),
-                     EntV3(pLocal, g_offMaxs), as::TicksScaled(8, ipt)))
-        {
-            psd::Count(psd::o_notop);
-            return keepsPin() ? 1 : 0;
-        }
+        // texture bug guard = keepsPin's 2 pinned ticks: CSS clip nudge leaves a tb pin unholdable the
+        // next tick, a pixel surf rides on (11-08 PsAhead geometry gates read no on every surf, deleted)
         /* strafing into the face = 450 at the best along-wall strafe yaw ( wall eats the into part ), toward the side your
            keys point along the wall ( straight in = velocity side ), only if it keeps the pin */
         constexpr float k_gainDot = 0.25f;
+        // first press that pins wins. 11-08 22:58: picking the deepest catch measured deeper=0.0000 on all
+        // 5 catches (catch depth is not press-controlled), reverted
         // botox m_pixel_surf_wall_strafe (variables.h:1082, menu_tab_movement.cpp:609): default
         // true. The gain path itself (as::WallStrafeYaw) already ran unconditionally in the CSS
         // port -- only the user-facing on/off toggle botox ships was missing.

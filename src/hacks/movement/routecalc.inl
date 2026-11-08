@@ -198,6 +198,21 @@ static void RcSimTick(void* pLocal, UserCmd_t* pCmd)
 // so both are cleared.
 struct RcStand { bool ground = false; float z = 0.f; };
 
+// THE ORIGIN OF A HULL STANDING STILL IS NOT THE FLOOR. CSS WalkMove returns at spd < 1 before
+// StayOnGround, so a landing CategorizePosition grounded inside its 2u trace keeps that hover,
+// 0..2u over the floor, for as long as you do not move. Log 11-08: stand -63.969, floor -64.969 ->
+// every jump 1.0u off, every jumpbug out of its window. The floor = where the hull swept 2u down
+// lands (TryPlayerMove's own endpos). Fallback the origin: a player under you (filter skips them)
+static float RcFloorUnder(void* pLocal, const Vec3& o)
+{
+    TraceFilterWorldProps filter; filter.Setup(pLocal);
+    GameTrace_t tr{};
+    TraceHull(o, Vec3(o.x, o.y, o.z - 2.f), EntV3(pLocal, g_offMins), EntV3(pLocal, g_offMaxs),
+              MASK_PLAYERSOLID, &filter, &tr);
+    if (tr.startsolid || tr.allsolid || tr.fraction >= 1.f || tr.plane.normal.z < 0.7f) return o.z;
+    return tr.endpos.z;
+}
+
 static RcStand RcPlaceAt(void* pLocal, UserCmd_t* pCmd, const Vec3& pos)
 {
     RcStand out;
@@ -219,8 +234,8 @@ static RcStand RcPlaceAt(void* pLocal, UserCmd_t* pCmd, const Vec3& pos)
         out.z = EntV3(pLocal, g_offOrigin).z;
         if (EntI(pLocal, g_offFlags) & FL_ONGROUND) { out.ground = true; break; }
     }
-    // one more quiet tick: the landing tick hovers, the next one snaps (CategorizePosition)
-    if (out.ground) { RcSimTick(pLocal, pCmd); out.z = EntV3(pLocal, g_offOrigin).z; }
+    // the landing tick hovers and a still hull never snaps (RcFloorUnder): z = the floor under it
+    if (out.ground) out.z = RcFloorUnder(pLocal, EntV3(pLocal, g_offOrigin));
     pCmd->buttons = iBtn; pCmd->forwardmove = fwd; pCmd->sidemove = side; pCmd->upmove = up;
     return out;
 }
@@ -422,7 +437,7 @@ static RcCheck RcEngineCheck(void* pLocal, UserCmd_t* pCmd, const Vec3& at, rs::
 
         rs::State s = RcReadState(pLocal, s_rcTickBase);
         s.oldDuck = false; s.oldJump = false;          // the settle ticks sent no buttons
-        rs::World w; w.floor = true; w.floorEff = st.z;
+        rs::World w; w.floor = true; w.floorEff = st.z; w.still = true;   // fwd/side 0: no StayOnGround
         rs::ScriptMem mem;
         // the checked hull stands still: PreventBunnyJumping never fires on it, so no bhop crop
         rs::Params still = params; still.cropFrac = 1.f;
@@ -674,9 +689,13 @@ static void RcSolveBegin(void* pLocal, UserCmd_t* pCmd, bool bPixel = false, int
     if (!start.air)
     {
         // a standing start is the settled floor: the check just measured it
-        float z = bHere ? vLive.z : pts[0].pos.z;
+        // where you stand hovers 0..2u over it standing still (RcFloorUnder): floor traced, the
+        // hull keeps its live z -- a press with no step first launches from the hover, any step snaps
+        float z = bHere ? RcFloorUnder(pLocal, vLive) : pts[0].pos.z;
         if (s_rcCheck.ran && fabsf(s_rcCheck.floorZ - z) < 4.f) z = s_rcCheck.floorZ;
         start.floorEff = z;
+        if (bHere && vLive.z - z > 0.01f)
+            DebugLog("RC: start hover %.4fu over floor %.4f (standing still, no StayOnGround)", vLive.z - z, z);
         if (bHere)
         {
             // where you stand, as the engine will start the next tick.
@@ -690,7 +709,7 @@ static void RcSolveBegin(void* pLocal, UserCmd_t* pCmd, bool bPixel = false, int
             // arc, not a key you can let go of.
             const int tb = g_offTickBase > 0 ? EntI(pLocal, g_offTickBase) : 0;
             start.s = RcReadState(pLocal, tb);
-            start.s.z = z; start.s.vz = 0.f; start.s.ground = true;
+            start.s.z = std::clamp(vLive.z, z, z + 2.f); start.s.vz = 0.f; start.s.ground = true;
             start.s.oldJump = s_prevCmdJump;
             start.s.fDuck = start.s.ducking = start.s.ducked = false;
             start.s.duckTime = 0.f;

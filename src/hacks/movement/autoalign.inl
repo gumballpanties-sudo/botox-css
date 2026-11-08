@@ -11,8 +11,8 @@
 // botox order per air wall tick: wall scan (16 x 1u hull rays) -> tb key held = hands off -> [CSS: hold
 // pixel surfs] -> steering away = hands off -> leaving over the lip = hands off -> YOUR OWN MOVE RIDES =
 // keep it -> fine ulp dx ladder -> coarse 10..90 pin loop -> park / unstick / keep (flush) -> contact loop
-// -> along-wall keys speed branch -> fix air stucks. CSS 11-08: all of it only while PsAhead (a pixel surf
-// lip on the next 8 ticks of fall); none ahead = your move back (on a plain wall every press is a texture bug).
+// -> along-wall keys speed branch -> fix air stucks. CSS 11-08 22:45: no lip / pixel surf gate (user: keep
+// the tb stick). AA: rides= / tbpin= = how many 1-tick sim pins also hold a 2nd tick (diag only).
 //
 // CSS mapping (disclosed):
 //   g_prediction.begin/end            -> Pred_Simulate; restore_entity_to_predicted_frame -> RestoreToFrame
@@ -48,7 +48,7 @@ namespace aa
     // fewer, hpress = none pins, pressed in anyway. mis = the sent hold said "pins next tick" and START
     // did not; blind = said nothing pins, START did
     enum Out { o_near, o_face, o_tb, o_away, o_angle, o_lip, o_pin, o_fine, o_park, o_unstick, o_keep, o_touch, o_miss,
-               o_slant, o_poff, o_stuckfix, o_hold, o_hold1, o_hpress, o_mis, o_blind, o_ahead, o_count };
+               o_slant, o_poff, o_stuckfix, o_hold, o_hold1, o_hpress, o_mis, o_blind, o_rides, o_tbpin, o_count };
     int s_outs[o_count] = {};
 
     struct Budget
@@ -432,6 +432,45 @@ static int AaHoldSearch(void* pLocal, UserCmd_t* cmd, const Vec3& n, float h, in
     return best;
 }
 
+// pixel surf vs texture bug, engine-proven: c1 pins its tick; does SOME hold press keep pinning the next
+// 2 ticks? Log 22:43: surf z -383.98 rode 28 ticks (hold pick 0) though c1 itself failed a 2nd tick, tbs at
+// z -147 / -171 / -173 pins=0/6 under every candidate then fall (clip nudge, tb RULE). Ends with sim state
+// = c1's tick (callers read it like botox). Budget out = no proof = no stick
+static bool AaRideOn(void* pLocal, const UserCmd_t& c1, const UserCmd_t& user, const Vec3& n)
+{
+    using namespace aa;
+    const int nBase = PredCommandsPredicted();
+    const float along = s_prePredVel.x * n.y - s_prePredVel.y * n.x;
+    const float sign = along >= 0.f ? 1.f : -1.f;
+    const auto step = [&](const UserCmd_t& c) {
+        UserCmd_t t = c;
+        t.buttons &= ~(IN_ATTACK | IN_ATTACK2);
+        t.hasbeenpredicted = false;
+        Pred_Simulate(pLocal, &t);
+        ++s_holdSims;
+        if (EntMoveType(pLocal) != MOVETYPE_WALK || (EntI(pLocal, g_offFlags) & FL_ONGROUND)) return false;
+        const Vec3 v = EntV3(pLocal, g_offVelocity);
+        return IsTargetVz(v.z, k_pinEps) && v.Length2D() >= k_holdMinXY;
+    };
+    // kind -1 = c1 again; rest = k_holdCands' first picks (hold log: pick 0..2 carry every ride)
+    static constexpr HoldCand k_ride[] = {
+        { -1, 0.f, 0.f, 0 }, { hk_own, 0.f, 0.f, 0 }, { hk_press, 0.f, 0.f, 0 },
+        { hk_wish, 0.f, 450.f, 0 }, { hk_wish, 0.f, 30.f, 0 }, { hk_wish, 0.f, 10.f, 0 },
+        { hk_wish, 0.f, 0.f, 0 }, { hk_own, 0.f, 0.f, 1 },
+    };
+    bool ok = false;
+    for (const HoldCand& k : k_ride)
+    {
+        if (ok || SimsLeft() < 3 || TbBudgetExpired()) break;
+        const UserCmd_t c = k.kind < 0 ? c1 : AaHoldCmd(user, k.kind, sign * k.off, k.move, k.flip, n);
+        RestoreToFrame(nBase - 1);
+        ok = step(c1) && step(c) && step(c);
+    }
+    RestoreToFrame(nBase - 1);
+    step(c1);
+    return ok;
+}
+
 // true = the hold owns this cmd (written), false = plain auto align decides
 static bool AaHoldTick(void* pLocal, UserCmd_t* cmd, const Vec3& n, float h, bool pinNow, bool steerAway)
 {
@@ -467,7 +506,6 @@ static bool AaHoldTick(void* pLocal, UserCmd_t* cmd, const Vec3& n, float h, boo
     if (!s_hold.on) return false;
 
     ++s_holdTicks;
-    const UserCmd_t orig = *cmd;
     int pick = -1;
     const int r = AaHoldSearch(pLocal, cmd, n, h, pick);
     // short = the best hold runs out inside the look-ahead. s = hull position along the face (tangent
@@ -480,31 +518,8 @@ static bool AaHoldTick(void* pLocal, UserCmd_t* cmd, const Vec3& n, float h, boo
     s_expect = true; s_expectPin = r >= 1;
     if (r >= k_holdH) { s_outs[o_hold]++;  return true; }
     if (r >= 1)       { s_outs[o_hold1]++; return true; }
-    if (pinNow)
-    {
-        // pinned and nothing the look-ahead flies keeps it: START pinned under what we SENT last tick,
-        // send it again. No last: press in, but not on a slanted face (an unproven straight press
-        // wedges the corner)
-        if (s_lastOk)
-        {
-            const UserCmd_t c = AaHoldCmd(orig, s_lastKind, s_lastRel, s_lastMove, s_lastFlip, n);
-            cmd->forwardmove = c.forwardmove; cmd->sidemove = c.sidemove;
-            cmd->upmove = c.upmove;           cmd->buttons = c.buttons;
-            s_outs[o_hpress]++;
-            return true;
-        }
-        if (MV_IsHullFlatWall(n))
-        {
-            const UserCmd_t c = PsPressInto(orig, n);
-            cmd->forwardmove = c.forwardmove;
-            cmd->sidemove    = c.sidemove;
-            cmd->buttons     = c.buttons;
-            s_lastOk = true; s_lastKind = hk_press; s_lastFlip = 0;
-            s_outs[o_hpress]++;
-            return true;
-        }
-    }
-    // a miss tick nothing re-catches: plain auto align decides (its gates apply again)
+    // pinned and nothing the look-ahead flies keeps it = the pin dies next tick (texture bug, or a surf's
+    // end): no blind re-press (11-08 22:45: was hpress, = tbpin 1:1 in log). Plain auto align decides
     s_aaHolding = false; s_expect = false;
     return false;
 }
@@ -539,11 +554,11 @@ static void AutoAlign(void* pLocal, UserCmd_t* cmd)
         if (!g_debugLogEnable || sec == s_sec) return;
         s_sec = sec;
         DebugLog("AA: near=%d face=%d tb=%d away=%d angle=%d lip=%d pin=%d fine=%d park=%d unstick=%d keep=%d touch=%d miss=%d slant=%d poff=%d stuckfix=%d"
-                 " | hold=%d short=%d hpress=%d mis=%d blind=%d hsims=%d ahead=%d",
+                 " | hold=%d short=%d hpress=%d mis=%d blind=%d hsims=%d rides=%d tbpin=%d",
                  s_outs[o_near], s_outs[o_face], s_outs[o_tb], s_outs[o_away], s_outs[o_angle], s_outs[o_lip],
                  s_outs[o_pin], s_outs[o_fine], s_outs[o_park], s_outs[o_unstick], s_outs[o_keep], s_outs[o_touch], s_outs[o_miss],
                  s_outs[o_slant], s_outs[o_poff], s_outs[o_stuckfix],
-                 s_outs[o_hold], s_outs[o_hold1], s_outs[o_hpress], s_outs[o_mis], s_outs[o_blind], s_holdSims, s_outs[o_ahead]);
+                 s_outs[o_hold], s_outs[o_hold1], s_outs[o_hpress], s_outs[o_mis], s_outs[o_blind], s_holdSims, s_outs[o_rides], s_outs[o_tbpin]);
         for (int& o : s_outs) o = 0;
         s_holdSims = 0;
     };
@@ -612,13 +627,11 @@ static void AutoAlign(void* pLocal, UserCmd_t* cmd)
     const Vec3 wallN(trace.plane.normal.x, trace.plane.normal.y, 0.f);   // normal.z == 0: unit xy
     const float userFwd = cmd->forwardmove, userSide = cmd->sidemove;   // given back when no pixel surf pins
     const bool steerAway = TB_SteeringAwayFromWall(cmd, trace.plane.normal, s_rawFwd, s_rawSide, 0.3f);
-    // about to fall on a pixel surf (PsAhead: a lip on the next 8 ticks of fall)? Yes = botox's full stick
-    // (hold, Fine, coarse pin loop, park / contact push keeping you flush for the catch). No = every pin a
-    // press finds is a texture bug (Fine's ulp ladder IS the tb press): your move back, hands off
-    const bool psAhead = PsAhead(pLocal, startPos, s_prePredVel, trace.plane.normal, mins, maxs,
-                                 as::TicksScaled(8, TickInterval()));
-    if (psAhead) s_outs[o_ahead]++;
-    if (AaHoldTick(pLocal, cmd, wallN, h, pinNow && psAhead, steerAway))
+    const int userButtons = cmd->buttons;
+    const UserCmd_t userCmd = *cmd;
+    // 11-08: PsAhead lip gates (trace fly, column ray) read no on every surf (logs 22:10 ahead=0, 22:30
+    // PSL lip=0), deleted. Surf vs tb = AaRideOn on every pin a press finds (rides below)
+    if (AaHoldTick(pLocal, cmd, wallN, h, pinNow, steerAway))
     {
         warmTick = -1; FlushDrop(); Diag();
         return;
@@ -678,11 +691,31 @@ static void AutoAlign(void* pLocal, UserCmd_t* cmd)
         }
     }
 
+    const auto simCmd = [&]() { UserCmd_t t = *cmd; Pred_Simulate(pLocal, &t); aaSims++; };
+    const auto alignedNow = [&]() {
+        if ((EntI(pLocal, g_offFlags) & FL_ONGROUND) || EntMoveType(pLocal) == MOVETYPE_LADDER) return false;
+        const Vec3 v = EntV3(pLocal, g_offVelocity);
+        return IsTargetVz(v.z, k_pinEps) && v.Length2D() >= 1.f;   // xy < 1 = stuck on the wall, not a surf
+    };
+    // after simCmd: pinned AND the pin rides on (AaRideOn) = stick; pinned but dies = texture bug, skip it
+    // (tbpin). Sim state ends at *cmd's tick, like botox's 1-tick check
+    const auto rides = [&]() {
+        if (!alignedNow()) return false;
+        const bool ok = AaRideOn(pLocal, *cmd, userCmd, wallN);
+        s_outs[ok ? o_rides : o_tbpin]++;
+        return ok;
+    };
+
     Flush flush;
     const bool flushOn = flush.Init(pLocal, cmd, trace.plane.normal, HullPlaneDist(trace, mins, maxs), maxs, budget);
     // your own move already rides (tb act R): keep it and its speed
     if (flushOn && flush.userPins) { warmTick = -1; s_outs[o_pin]++; Restore(); Diag(); return; }
-    if (flushOn && psAhead && flush.Fine(cmd)) { warmTick = -1; s_outs[o_fine]++; Restore(); Diag(); return; }
+    if (flushOn && flush.Fine(cmd))
+    {
+        Restore(); simCmd();
+        if (rides()) { warmTick = -1; s_outs[o_fine]++; Restore(); Diag(); return; }
+        cmd->forwardmove = userFwd; cmd->sidemove = userSide; cmd->buttons = userButtons;
+    }
     if (flush.sims) Restore();
 
     Vec3 wallAngle = VectorAngles(angles); ClampAnglesMv(wallAngle);
@@ -695,32 +728,23 @@ static void AutoAlign(void* pLocal, UserCmd_t* cmd)
     GameTrace_t trace2{};
     TraceLine(lbStart, lbStart + Vec3(savedCos, savedSin, 0.f), MASK_PLAYERSOLID, &fil, &trace2);
 
-    const auto simCmd = [&]() { UserCmd_t t = *cmd; Pred_Simulate(pLocal, &t); aaSims++; };
-    const auto alignedNow = [&]() {
-        if ((EntI(pLocal, g_offFlags) & FL_ONGROUND) || EntMoveType(pLocal) == MOVETYPE_LADDER) return false;
-        const Vec3 v = EntV3(pLocal, g_offVelocity);
-        return IsTargetVz(v.z, k_pinEps) && v.Length2D() >= 1.f;   // xy < 1 = stuck on the wall, not a surf
-    };
-
-    if (!psAhead)
-        warmTick = -1;   // falls to the no-pixel-surf gate below: your move back
-    else if (warmTick >= 0 && tickNow - warmTick <= 2 && (warmFwd != 0.f || warmSide != 0.f))
+    if (warmTick >= 0 && tickNow - warmTick <= 2 && (warmFwd != 0.f || warmSide != 0.f))
     {
         Restore();
         cmd->forwardmove = warmFwd;
         cmd->sidemove    = warmSide;
         simCmd();
-        if (alignedNow()) { warmTick = tickNow; detect = true; }
+        if (rides()) { warmTick = tickNow; detect = true; }
     }
 
-    for (float multiplier = 10.f; psAhead && !detect && multiplier < 100.f && !budget.Expired(); multiplier += 10.f)
+    for (float multiplier = 10.f; !detect && multiplier < 100.f && !budget.Expired(); multiplier += 10.f)
     {
         Restore();
         const float fwd = cosRot * multiplier, side = -sinRot * multiplier;
         cmd->forwardmove = fwd;
         cmd->sidemove    = side;
         simCmd();
-        if (alignedNow())
+        if (rides())
         {
             warmFwd = fwd; warmSide = side; warmTick = tickNow;
             detect = true;
@@ -728,19 +752,7 @@ static void AutoAlign(void* pLocal, UserCmd_t* cmd)
         }
     }
 
-    // no pixel surf ahead = hands off, your move. Park / keep / contact push on a plain wall are the texture
-    // bug press (log 11-08: park=53 keep=11 with pin=0 fine=0 = AA texturebugged you on plain walls)
-    if (!detect && !psAhead)
-    {
-        cmd->forwardmove = userFwd;
-        cmd->sidemove    = userSide;
-        Restore();
-        s_outs[o_miss]++;
-        Diag();
-        return;
-    }
-
-    // a pixel surf ahead but no pin THIS tick: the stick. 1 ulp park (or step off a dead stop) keeps you flush
+    // no pin THIS tick: the stick (botox, restored 11-08 22:45 by user: "bring back the tb stick"). 1 ulp park (or step off a dead stop) keeps you flush
     // for the catch tick instead of the hard-hit contact push; already flush and neither = YOUR move, the
     // contact push would only slam the hull back to 0.03125
     if (flushOn && !detect)
