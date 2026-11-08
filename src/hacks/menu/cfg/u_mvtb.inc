@@ -1,0 +1,11 @@
+// unit mvtb cfg rows, spliced into config.cpp kEntries: { "key", CfgEntry::BOOL, &g_x, 0 },
+{ "tbTypesMask",         CfgEntry::INT,    &g_tbTypesMask, 0 },
+{ "tbAutoDuck",          CfgEntry::BOOL,   &g_tbAutoDuck, 0 },
+{ "tbWallstrafeOpt",     CfgEntry::BOOL,   &g_tbWallstrafeOpt, 0 },
+{ "tbSound",             CfgEntry::INT,    &g_tbSound, 0 },
+{ "tbSoundCustom",       CfgEntry::STR,    g_tbSoundCustom, sizeof(g_tbSoundCustom) },
+{ "tbSoundVolume",       CfgEntry::FLOAT,  &g_tbSoundVolume, 0 },
+// airstuck.inl vars (defined in dllmain.cpp -- cfg rows only, see u_mvtb.h note)
+{ "asMovementFix",       CfgEntry::BOOL,   &g_asMovementFix, 0 },
+{ "asScreenMessage",     CfgEntry::BOOL,   &g_asScreenMessage, 0 },
+{ "asFixStucks",         CfgEntry::BOOL,   &g_asFixStucks, 0 },

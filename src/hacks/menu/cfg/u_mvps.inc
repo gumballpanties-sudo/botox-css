@@ -1,0 +1,6 @@
+// unit mvps cfg rows, spliced into config.cpp kEntries: { "key", CfgEntry::BOOL, &g_x, 0 },
+{ "psSound",       CfgEntry::INT,  &g_psSound, 0 },
+{ "psSoundCustom", CfgEntry::STR,  g_psSoundCustom, sizeof(g_psSoundCustom) },
+{ "psSoundVolume", CfgEntry::FLOAT, &g_psSoundVolume, 0 },
+{ "psFinderPixelsurf", CfgEntry::BOOL, &g_psFinderPixelsurf, 0 },
+{ "psFinderMapTb",     CfgEntry::BOOL, &g_psFinderMapTb, 0 },
