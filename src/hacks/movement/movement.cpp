@@ -559,6 +559,43 @@ static bool MV_PointUnusable(const Vec3& p)
     return s_mvOutsideOk == 1 && MV_PointOutsideWorld(p);
 }
 
+// ---- which BSP AREA a point sits in (-1 = could not ask) ---------------------------------
+// IVEngineClient GetBSPTreeQuery 42 + GetLeavesArea 57 (cdll_int.h order, == Amalgam x64
+// IVEngineClient.h, counted from the confirmed GetLevelName 51) and ISpatialQuery slot 1
+// EnumerateLeavesAtPoint (bsptreedata.h:71: LeafCount 0, then the enumerators, no dtor). The
+// whole-map scan asks it to tell the 3D skybox (its own area) from the map.
+// Validated once like PointOutsideWorld: the tree's LeafCount (its slot 0) has to equal the
+// engine's LevelLeafCount (41). Anything else = not the interface we think, gate stays off.
+struct MvLeafCatch   // ISpatialLeafEnumerator: one virtual, first leaf wins, stop
+{
+    virtual bool EnumerateLeaf(int leaf, intptr_t ctx) { *reinterpret_cast<int*>(ctx) = leaf; return false; }
+};
+static MvLeafCatch s_mvLeafCatch;
+static int s_mvAreaOk = -1;               // -1 not asked yet, 0 do not trust, 1 trusted
+static int MV_PointArea(const Vec3& p)
+{
+    if (!g_engine) return -1;
+    __try {
+        void** ve = *(void***)g_engine;
+        void* q = ((void*(__fastcall*)(void*))ve[42])(g_engine);
+        if (!q) return -1;
+        void** vq = *(void***)q;
+        if (s_mvAreaOk < 0)
+        {
+            const int nTree = ((int(__fastcall*)(void*))vq[0])(q);
+            const int nLvl  = ((int(__fastcall*)(void*))ve[41])(g_engine);
+            s_mvAreaOk = (nTree > 0 && nTree == nLvl) ? 1 : 0;
+            DebugLog("MV: BSP area query self-check: tree leaves %d, level leaves %d -> %s",
+                     nTree, nLvl, s_mvAreaOk ? "ok" : "MISMATCH, area gate OFF");
+        }
+        if (s_mvAreaOk != 1) return -1;
+        int leaf = -1;
+        ((bool(__fastcall*)(void*, const Vec3&, void*, intptr_t))vq[1])(q, p, &s_mvLeafCatch, (intptr_t)&leaf);
+        if (leaf < 0) return -1;
+        return ((int(__fastcall*)(void*, int*, int))ve[57])(g_engine, &leaf, 1);
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return -1; }
+}
+
 // WorldProps now rejects trigger / non-solid volumes itself -> the two filters are
 // identical. Alias kept so wall-detect / texbug call sites read as brush-only intent.
 using TraceFilterWorldBrush = TraceFilterWorldProps;
@@ -2559,6 +2596,8 @@ static void Movement_RunImpl(UserCmd_t* pCmd)
             PixelSurf(pLocal, pCmd);
             JsCaptureEnd(pLocal, pCmd);   // botox: jump_stats after the last mover, before the finder probes
         }
+        // pixelsurf lines walk (finder hold proof): after jumpstats' END capture, like the finder
+        PsRideLineTick(pLocal, pCmd);
         PixelFinder(pLocal, pCmd);
         PixelMapScan(pLocal, pCmd);   // whole-map scan: same scanner, a queue of brush seams
     }
@@ -2716,6 +2755,7 @@ static void Movement_RunImpl(UserCmd_t* pCmd)
         d.interval    = TickInterval();
         d.tick        = s_prePredTick;
         d.tb = s_textureBugHit; d.as = s_airStuckReal; d.ps = s.psHit; d.wc = s_wcLanded;
+        d.tbOwns = s_tbOwnsCmd;
         Detections_Tick(d);
         // botox get_trick_states: eb queued / tb / as / wc / ps now void the jump
         JumpstatsTick(pCmd, s_ebDetected || s_textureBugHit || s_airStuckHit || s_airStuckReal

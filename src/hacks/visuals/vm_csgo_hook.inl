@@ -100,13 +100,31 @@ static void VmCs_EyeAdjustSafe(void* owner, float eye[3], float ang[3])
             }
         }
         ang[0] -= s_pitch;
-        eye[2] -= s_z - s_vmCsBobState.vert;
-        const float lateral = s_right + s_vmCsBobState.lat;
-        if (lateral != 0.f)
+        eye[2] -= s_z;
+
+        // bob = AddViewModelBobHelper 1:1 (tf_weaponbase.cpp:4703, CS:GO same helper). vert carries
+        // the run lower (~-6 at 250 u/s): raw on eye z it sank the gun off screen -- that was the break.
+        const float vb = s_vmCsBobState.vert, lb = s_vmCsBobState.lat;
+        if (vb != 0.f || lb != 0.f)
+        {
+            constexpr float d2r = 3.14159265f / 180.f;
+            const float sp = sinf(ang[0] * d2r), cp = cosf(ang[0] * d2r);
+            const float sy = sinf(ang[1] * d2r), cy = cosf(ang[1] * d2r);
+            const float sr = sinf(ang[2] * d2r), cr = cosf(ang[2] * d2r);
+            const float fwd[3] = { cp * cy, cp * sy, -sp };
+            const float rgt[3] = { -sr * sp * cy + cr * sy, -sr * sp * sy - cr * cy, -sr * cp };
+            for (int i = 0; i < 3; ++i) eye[i] += fwd[i] * vb * 0.4f + rgt[i] * lb * 0.2f;
+            eye[2] += vb * 0.1f;
+            ang[2] += vb * 0.5f;
+            ang[0] -= vb * 0.4f;
+            ang[1] -= lb * 0.3f;
+        }
+
+        if (s_right != 0.f)
         {
             const float sy = sinf(ang[1] * 3.14159265f / 180.f), cy = cosf(ang[1] * 3.14159265f / 180.f);
-            eye[0] += sy * lateral;
-            eye[1] += -cy * lateral;
+            eye[0] += sy * s_right;
+            eye[1] += -cy * s_right;
         }
     } __except (EXCEPTION_EXECUTE_HANDLER) {}
 }

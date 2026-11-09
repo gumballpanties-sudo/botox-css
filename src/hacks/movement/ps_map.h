@@ -27,13 +27,19 @@ struct PsMapSeam
     float z = 0.f;              // the edge height = the brush's flat top
     float ax = 0.f, ay = 0.f;   // both ends, in the wall plane at z
     float bx = 0.f, by = 0.f;
+    // how far the face moves INTO the brush per unit of height above z (nz / |n.xy|): 0 = plumb,
+    // > 0 leans back, < 0 overhangs. The wall-above ray follows it, or a leaning wall reads as none
+    float lean = 0.f;
     float Len() const { const float dx = bx - ax, dy = by - ay; return std::sqrt(dx * dx + dy * dy); }
 };
 
-// A ledge you can stand on is a face that is near vertical. The finder anchors on anything up to
-// |nz| 0.7, but that is a face the CURSOR picked; here nothing is aiming, so a 45 degree slab
-// would hand the sim a sloped "edge" per brush in the map. 0.2 = ~11 degrees off vertical.
-inline constexpr float k_psMapMaxNz  = 0.2f;
+// The crosshair finder anchors on any face up to |nz| 0.7 and this is the same scanner, so the
+// same bound. It was 0.2 (~11 degrees) on the worry that a sloped face makes a sloped edge -- it
+// does not: the edge is the face cut by the brush's FLAT top (PsMap_BrushTop), so it is level
+// whatever the face does below it. 0.2 threw away every leaning wall and overhang in the map,
+// surfs the finder found when you aimed at them and the map scan never asked about.
+// Past 0.7 the face is a floor (walkable), and a floor edge is a ledge, not a surf.
+inline constexpr float k_psMapMaxNz  = 0.7f;
 inline constexpr float k_psMapMinLen = 12.f;    // shorter than a hull is half of: nothing rides it
 inline constexpr float k_psMapMaxLen = 8192.f;  // sanity, not a real limit
 
@@ -83,6 +89,7 @@ inline bool PsMap_FaceSeam(const FmPlane* p, int count, int face, float zTop, Ps
     if (smax - smin < k_psMapMinLen || smax - smin > k_psMapMaxLen) return false;
 
     out.nx = nx; out.ny = ny; out.z = zTop;
+    out.lean = w.nz / len2;
     out.ax = px + tx * smin; out.ay = py + ty * smin;
     out.bx = px + tx * smax; out.by = py + ty * smax;
     return true;
@@ -118,9 +125,12 @@ inline void PsMap_Merge(std::vector<PsMapSeam>& v, float gap = 2.f)
         // case, it is exactly the vertex-manipulated geometry pixel surfs live on.
         // A real row of brushes shares its top plane bit for bit (nz is exactly 1 on an axial
         // top, so z is the plane distance itself), so 1/64u still merges every row it should.
+        // Lean too: two faces can share the edge line and differ above it (plumb vs leaning),
+        // and the merged run keeps ONE lean for its wall-above test
         const float d = s.nx * s.ax + s.ny * s.ay;
-        return std::array<long, 4>{ std::lround(s.nx * 100.f), std::lround(s.ny * 100.f),
-                                    std::lround(d * 2.f), std::lround(s.z * 64.f) };
+        return std::array<long, 5>{ std::lround(s.nx * 100.f), std::lround(s.ny * 100.f),
+                                    std::lround(d * 2.f), std::lround(s.z * 64.f),
+                                    std::lround(s.lean * 100.f) };
     };
     // the run's own tangent decides the order, so "along the wall" means one thing per plane
     auto proj = [](const PsMapSeam& s, float x, float y) { return s.ny * x - s.nx * y; };

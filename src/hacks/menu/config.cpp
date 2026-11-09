@@ -2,6 +2,7 @@
 #include "../hud/indicators.h"   // botox indicators vars (rows in cfg/u_ind.inc)
 #include "../screen/colorcorrect.h"   // CcResetCurve -- a curve that fails to parse goes back to identity
 #include "../aim/aim.h"   // the aimbot's vars ride in this same file
+#include "../visuals/esp_preview.h"   // g_espPreview
 #include "../misc/names.h"        // and custom names' cycle lists + aliases
 #include "../movement/detections.h"    // unit B
 #include "../movement/ps_lines.h"      // unit B
@@ -527,6 +528,9 @@ static const CfgEntry kEntries[] = {
     { "pixelHop",         CfgEntry::BOOL,   &g_pixelHop, 0 },
     { "pixelHopKey",      CfgEntry::INT,    &g_pixelHopKey, 0 },
     { "pixelHopMode",     CfgEntry::INT,    &g_pixelHopMode, 0 },
+    { "phReach",          CfgEntry::BOOL,   &g_phReach, 0 },
+    { "phReachTicks",     CfgEntry::INT,    &g_phReachTicks, 0 },
+    { "phReachAngle",     CfgEntry::FLOAT,  &g_phReachAngle, 0 },
 
     // -- Unit A port: small tricks from botox csgo-sdk --
     { "nulls",            CfgEntry::BOOL,   &g_nulls, 0 },
@@ -593,6 +597,7 @@ static const CfgEntry kEntries[] = {
     { "psFinderNoProps",  CfgEntry::BOOL,   &g_psFinderNoProps, 0 },
     { "psFinderLength",   CfgEntry::BOOL,   &g_psFinderLength, 0 },
     { "psMapLines",       CfgEntry::BOOL,   &g_psMapLines, 0 },
+    { "psMapMaxDist",     CfgEntry::FLOAT,  &g_psMapMaxDist, 0 },
     { "psAssist",         CfgEntry::BOOL,   &g_psAssist, 0 },
     { "psAssistKey",      CfgEntry::INT,    &g_psAssistKey, 0 },
     { "psAssistMode",     CfgEntry::INT,    &g_psAssistMode, 0 },
@@ -656,6 +661,7 @@ static const CfgEntry kEntries[] = {
     // kept -- real CS feature, still used by practice.inl PrBot(), see report KEPT EXTRAS.
 
     { "espEnable",               CfgEntry::BOOL,   &g_espEnable, 0 },
+    { "espPreview",              CfgEntry::BOOL,   &g_espPreview, 0 },
     { "espTeammates",            CfgEntry::BOOL,   &g_espTeammates, 0 },
     { "espMaxDistance",          CfgEntry::FLOAT,  &g_espMaxDistance, 0 },
     { "espDistanceFade",         CfgEntry::BOOL,   &g_espDistanceFade, 0 },
@@ -925,9 +931,7 @@ static const CfgEntry kEntries[] = {
 
     // ---- unit B: pixelsurf lines ----
     { "psLinesEnable",     CfgEntry::BOOL,   &g_psLinesEnable, 0 },
-    { "psLinesFull",       CfgEntry::BOOL,   &g_psLinesFull, 0 },
     { "psLinesColor",      CfgEntry::FLOAT4, g_psLinesColor, 0 },
-    { "psLinesFullColor",  CfgEntry::FLOAT4, g_psLinesFullColor, 0 },
     { "psLinesStyle",      CfgEntry::INT,    &g_psLinesStyle, 0 },
     { "psLinesThickness",  CfgEntry::FLOAT,  &g_psLinesThickness, 0 },
 

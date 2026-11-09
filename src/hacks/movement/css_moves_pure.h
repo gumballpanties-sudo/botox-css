@@ -80,6 +80,17 @@ namespace cssm
         if (IntoGain(vx, vy, mx, my, nx, ny) >= k_minGain) { dx = mx; dy = my; }
     }
 
+    // Pixel surf ride estimate for a planned catch, used to rank planner hits. A held PS on CSS
+    // ends at a FIXED z (log 11-08/11-09: every ride dies at floor(lip) + 1/32): the clip nudge
+    // walks the pinned hull up 1/32 u/s, so ride ticks = (lipTop - catch z) / (dt/32) and the press
+    // can not extend it. Ride distance ~ depth * along-face speed. Floors: a catch rides its own
+    // tick at least (depth 1 tick), a stalled hull (xy < 0.25 = air stuck) still ranks, last.
+    inline float PsRideScore(float lipTop, float arriveZ, float xy)
+    {
+        const float depth = lipTop - arriveZ;
+        return (depth > 0.0005f ? depth : 0.0005f) * (xy > 0.25f ? xy : 0.25f);
+    }
+
     // Long jump duck hold, asked once per cmd after the takeoff tick. `held` = duck ticks already
     // sent, the takeoff tick counts as 1. The second tick is never dropped: released there,
     // m_bDucking (set on the takeoff tick, :943) is still pending and the unduck branch runs

@@ -424,6 +424,179 @@ static std::vector<Vec3> PfDedupe(const std::vector<Vec3>& vIn)
 }
 
 // one budgeted slice of the anchored column
+// PfPlace / Holds, lifted out of PfScanChunk so pixelsurf lines walk a ride with the finder's
+// own proof (see the comments at their call sites in PfScanChunk)
+static void PfPlaceAt(void* pLocal, Vec3 vAt, bool bDuck)
+{
+    constexpr float k_cssAirDuckShift = 8.5f;
+    const bool bBaseDuck = (EntI(pLocal, g_offFlags) & FL_DUCKING) != 0;
+    if (bDuck && !bBaseDuck) vAt.z -= k_cssAirDuckShift;
+    else if (!bDuck && bBaseDuck) vAt.z += k_cssAirDuckShift;
+    g_fnSetAbsOrigin(pLocal, vAt);
+    EntSetV3(pLocal, g_offOrigin, vAt);
+    EntSetI(pLocal, g_offFlags, EntI(pLocal, g_offFlags) & ~FL_ONGROUND);
+    if (g_offGroundEntity > 0) EntSetI(pLocal, g_offGroundEntity, -1);
+}
+
+struct PfHoldEnv
+{
+    void* pLocal; UserCmd_t* pCmd; TraceFilterWorldProps* filter;
+    Vec3 mins, maxs; int basePredicted; float halfGrav, surfTol; int buttons;
+};
+
+static bool PfHoldsAt(const PfHoldEnv& e, const PfHit& h, float s, int& sims)
+{
+    void* pLocal = e.pLocal; UserCmd_t* pCmd = e.pCmd;
+    const Vec3 vT(h.n.y, -h.n.x, 0.f);
+    const Vec3 vAt = h.wall + vT * s + h.n * h.gap;
+    GameTrace_t fit{};
+    TraceHull(vAt, vAt, e.mins, Vec3(e.maxs.x, e.maxs.y, h.duck ? k_pfDuckHullZ : k_pfStandHullZ),
+              MASK_PLAYERSOLID, e.filter, &fit);
+    if (fit.startsolid || fit.allsolid) return false;
+    const Vec3 vInto(-h.n.x, -h.n.y, 0.f);
+    Vec3 vIntoAngle = VectorAngles(vInto);
+    ClampAnglesMv(vIntoAngle);
+    RestoreToFrame(e.basePredicted - 1);
+    PfPlaceAt(pLocal, vAt, h.duck);
+    EntSetV3(pLocal, g_offVelocity, vInto * 10.f + Vec3(0.f, 0.f, -e.halfGrav));
+    pCmd->buttons = e.buttons & ~IN_JUMP;
+    if (h.duck) pCmd->buttons |= IN_DUCK; else pCmd->buttons &= ~IN_DUCK;
+    // the press that proved the pin (light 10 straight in, or the hold-set one that rescued it)
+    we::WishToCmd(vIntoAngle.y + h.pressOff, h.pressSize, pCmd->viewangles.y, pCmd->forwardmove, pCmd->sidemove);
+    for (int t = 0; t < 2; t++)
+    {
+        Pred_Simulate(pLocal, pCmd);
+        sims++;
+        if (EntI(pLocal, g_offFlags) & FL_ONGROUND) return false;
+        if (fabsf(EntV3(pLocal, g_offVelocity).z + e.halfGrav) >= e.surfTol) return false;
+        if (fabsf(EntV3(pLocal, g_offOrigin).z - h.wall.z) > 0.1f) return false;
+    }
+    return true;
+}
+
+// ==== pixelsurf lines: a ridden surf walked like the finder's SURF LENGTH pass ==================
+// (header in pixelsurf.inl). One walk at a time; it does not need you on the wall any more, so it
+// finishes even after you fall off
+static PfHit s_rlHit;
+static bool  s_rlBusy = false, s_rlProven = false;
+static int   s_rlDir = 0, s_rlK = 1, s_rlButtons = 0, s_rlSims = 0;
+static char  s_rlMap[128] = {};
+
+static void PsRideLineStart(void* pLocal, UserCmd_t* pCmd)
+{
+    if (s_rlBusy) { DebugLog("PSL: ride skip, last line still walking"); return; }
+    Vec3 n{};
+    if (!PsWallTouch(pLocal, n, s_prePredOrigin)) { DebugLog("PSL: ride skip, no face flush at z=%.3f", s_prePredOrigin.z); return; }
+    n.z = 0.f;
+    if (n.Length2D() < 0.5f) return;
+    n.Normalize();
+    // hull origin off the face = the hull's support along n (PsWallTouch found it within 0.05u),
+    // so wall + n * gap is the START origin exactly and Holds(0) replays the real pin
+    const Vec3 mins = EntV3(pLocal, g_offMins), maxs = EntV3(pLocal, g_offMaxs);
+    const float gap = fabsf(n.x) * std::max(fabsf(mins.x), fabsf(maxs.x)) + fabsf(n.y) * std::max(fabsf(mins.y), fabsf(maxs.y));
+    PfHit h;
+    h.wall = s_prePredOrigin - n * gap;
+    h.n = n; h.gap = gap;
+    h.duck = (s_prePredFlags & FL_DUCKING) != 0;
+    const char* map = PsTrajLevelName();
+    if (PsTrajCovered(h.wall, map, 2.f)) { DebugLog("PSL: ride skip, already drawn here"); return; }
+    s_rlHit = h;
+    s_rlBusy = true; s_rlProven = false;
+    s_rlDir = 0; s_rlK = 1; s_rlSims = 0;
+    s_rlButtons = pCmd->buttons;
+    snprintf(s_rlMap, sizeof(s_rlMap), "%s", map);
+    DebugLog("PSL: ride start z=%.3f n=(%.2f %.2f) duck=%d", h.wall.z, n.x, n.y, (int)h.duck);
+}
+
+static void PsRideLineTick(void* pLocal, UserCmd_t* pCmd)
+{
+    if (!s_rlBusy) return;
+    const auto stop = []
+    {
+        s_rlBusy = false;
+        std::lock_guard<std::mutex> l(s_psTrajLock);
+        s_psTrajWalking.clear();
+    };
+    if (!g_psLinesEnable || !EntAlive(pLocal) || strncmp(s_rlMap, PsTrajLevelName(), sizeof(s_rlMap) - 1) != 0)
+    {
+        stop();
+        return;
+    }
+
+    // own clock, a quarter tick: the line costs a few cmds, never a hitch
+    static LARGE_INTEGER s_liFreq = [] { LARGE_INTEGER f{}; QueryPerformanceFrequency(&f); return f; }();
+    LARGE_INTEGER liStart{}, liNow{};
+    QueryPerformanceCounter(&liStart);
+    const double flBudgetMs = TickInterval() > 0.f ? TickInterval() * 1000.0 * 0.25 : 3.75;
+    auto ElapsedMs = [&]() -> double
+    {
+        QueryPerformanceCounter(&liNow);
+        return double(liNow.QuadPart - liStart.QuadPart) * 1000.0 / double(s_liFreq.QuadPart);
+    };
+
+    TraceFilterWorldProps filter; filter.Setup(pLocal);
+    const int iBackupButtons = pCmd->buttons;
+    const float flBackupForward = pCmd->forwardmove, flBackupSide = pCmd->sidemove;
+    const PfHoldEnv env{ pLocal, pCmd, &filter, EntV3(pLocal, g_offMins), EntV3(pLocal, g_offMaxs), PredCommandsPredicted(),
+                         CvarFloat("sv_gravity", 800.f) * TickInterval() * 0.5f, 1.5f, s_rlButtons };
+    PfHit& h = s_rlHit;
+    bool done = false, lost = false;
+    if (!s_rlProven)
+    {
+        s_rlProven = PfHoldsAt(env, h, 0.f, s_rlSims);
+        done = lost = !s_rlProven;
+    }
+    // PfScanChunk's walk loop, one pin
+    while (!done && ElapsedMs() < flBudgetMs)
+    {
+        const float sgn = s_rlDir ? 1.f : -1.f;
+        if (s_rlK <= k_pfLenMax && PfHoldsAt(env, h, sgn * k_pfLenStep * float(s_rlK), s_rlSims))
+        {
+            h.ext[s_rlDir] = sgn * k_pfLenStep * float(s_rlK);
+            s_rlK++;
+            continue;
+        }
+        if (s_rlK <= k_pfLenMax)
+        {
+            float lo = k_pfLenStep * float(s_rlK - 1), hi = k_pfLenStep * float(s_rlK);
+            for (int b = 0; b < 3; b++)
+            {
+                const float mid = (lo + hi) * 0.5f;
+                if (PfHoldsAt(env, h, sgn * mid, s_rlSims)) lo = mid; else hi = mid;
+            }
+            h.ext[s_rlDir] = sgn * lo;
+        }
+        if (s_rlDir == 0) { s_rlDir = 1; s_rlK = 1; }
+        else done = true;
+    }
+    pCmd->buttons = iBackupButtons;
+    pCmd->forwardmove = flBackupForward;
+    pCmd->sidemove = flBackupSide;
+    RestoreToFrame(env.basePredicted - 1);
+
+    const Vec3 vT(h.n.y, -h.n.x, 0.f);
+    const Vec3 a = h.wall + vT * h.ext[0], b = h.wall + vT * h.ext[1];
+    if (done)
+        DebugLog("PSL: ride line len=%.1f (%.1f / %.1f) sims=%d%s", h.ext[1] - h.ext[0], h.ext[0], h.ext[1], s_rlSims,
+                 lost ? " LOST: start pin did not replay" : "");
+    std::lock_guard<std::mutex> l(s_psTrajLock);
+    s_psTrajWalking.clear();
+    if (!done)
+    {
+        s_psTrajWalking = { a, b };
+        return;
+    }
+    s_rlBusy = false;
+    // a pin that holds on its own spot only (len 0) is still a surf: drawn as a 1u mark
+    if (!lost)
+    {
+        PsTrajSegment seg{ a, h.ext[1] - h.ext[0] >= 1.f ? b : h.wall + vT * 0.5f, {} };
+        if (h.ext[1] - h.ext[0] < 1.f) seg.a = h.wall - vT * 0.5f;
+        snprintf(seg.map, sizeof(seg.map), "%s", s_rlMap);
+        s_psTrajSegments.push_back(seg);
+    }
+}
+
 static void PfScanChunk(void* pLocal, UserCmd_t* pCmd)
 {
     // QPF is fixed for the life of the process -- asking once per chunk is a syscall-shaped
@@ -472,17 +645,7 @@ static void PfScanChunk(void* pLocal, UserCmd_t* pCmd)
     //  * the ground HANDLE, not just FL_ONGROUND: sv_optimizedmovement 1 skips the recategorize
     //    before Duck(), so a base frame on the ground ran the probe's duck as an on-ground timed
     //    duck (no shift, then a late air FinishDuck +8.5 mid-probe)
-    auto PfPlace = [&](Vec3 vAt, bool bDuck)
-    {
-        constexpr float k_cssAirDuckShift = 8.5f;
-        const bool bBaseDuck = (EntI(pLocal, g_offFlags) & FL_DUCKING) != 0;
-        if (bDuck && !bBaseDuck) vAt.z -= k_cssAirDuckShift;
-        else if (!bDuck && bBaseDuck) vAt.z += k_cssAirDuckShift;
-        g_fnSetAbsOrigin(pLocal, vAt);
-        EntSetV3(pLocal, g_offOrigin, vAt);
-        EntSetI(pLocal, g_offFlags, EntI(pLocal, g_offFlags) & ~FL_ONGROUND);
-        if (g_offGroundEntity > 0) EntSetI(pLocal, g_offGroundEntity, -1);
-    };
+    auto PfPlace = [&](Vec3 vAt, bool bDuck) { PfPlaceAt(pLocal, vAt, bDuck); };
 
     const Vec3 vWallNormal = s_pfNormal;
     const Vec3 vTangent = s_pfTangent;      // wall tangent for the lateral band sweep
@@ -1047,34 +1210,8 @@ static void PfScanChunk(void* pLocal, UserCmd_t* pCmd)
     // of zero reads exactly like a pin -- that is how a walk would run on through the next wall.
     // ponytail: no MV_PinOnProp per step (16 traces); a crate against the wall extends a run. Add
     // it here if a line is seen crossing one
-    auto Holds = [&](const PfHit& h, float s) -> bool
-    {
-        const Vec3 vT(h.n.y, -h.n.x, 0.f);
-        const Vec3 vAt = h.wall + vT * s + h.n * h.gap;
-        GameTrace_t fit{};
-        TraceHull(vAt, vAt, vMins, Vec3(vMaxs.x, vMaxs.y, h.duck ? k_pfDuckHullZ : k_pfStandHullZ),
-                  MASK_PLAYERSOLID, &filter, &fit);
-        if (fit.startsolid || fit.allsolid) return false;
-        const Vec3 vInto(-h.n.x, -h.n.y, 0.f);
-        Vec3 vIntoAngle = VectorAngles(vInto);
-        ClampAnglesMv(vIntoAngle);
-        RestoreToFrame(nBasePredicted - 1);
-        PfPlace(vAt, h.duck);
-        EntSetV3(pLocal, g_offVelocity, vInto * 10.f + Vec3(0.f, 0.f, -flHalfGrav));
-        pCmd->buttons = s_pfBaseButtons & ~IN_JUMP;
-        if (h.duck) pCmd->buttons |= IN_DUCK; else pCmd->buttons &= ~IN_DUCK;
-        // the press that proved the pin (light 10 straight in, or the hold-set one that rescued it)
-        we::WishToCmd(vIntoAngle.y + h.pressOff, h.pressSize, pCmd->viewangles.y, pCmd->forwardmove, pCmd->sidemove);
-        for (int t = 0; t < 2; t++)
-        {
-            Pred_Simulate(pLocal, pCmd);
-            s_pfLenSims++;
-            if (EntI(pLocal, g_offFlags) & FL_ONGROUND) return false;
-            if (fabsf(EntV3(pLocal, g_offVelocity).z + flHalfGrav) >= flSurfTol) return false;
-            if (fabsf(EntV3(pLocal, g_offOrigin).z - h.wall.z) > 0.1f) return false;
-        }
-        return true;
-    };
+    const PfHoldEnv holdEnv{ pLocal, pCmd, &filter, vMins, vMaxs, nBasePredicted, flHalfGrav, flSurfTol, s_pfBaseButtons };
+    auto Holds = [&](const PfHit& h, float s) -> bool { return PfHoldsAt(holdEnv, h, s, s_pfLenSims); };
 
     const bool bWalk = s_pfNextI > s_pfSteps && !s_pfQuiet && g_psFinderLength
                     && s_pfHits.size() == s_pfFound.size();
@@ -2045,6 +2182,13 @@ static void PS_AssistTick(void* pLocal, UserCmd_t* pCmd, bool bPredicted)
         int last = -1;
         std::vector<n_assist::target_t> targets;
         targets.reserve(ps_max_points);
+        // botox took the FIRST program that hit. Ride length is set by catch depth alone (ride ends at
+        // a fixed z, see cssm::PsRideScore), and programs arc into the window at different depths,
+        // so every hit is scored and the longest estimated ride wins (ties keep program order).
+        n_assist::run_t best;
+        n_assist::program_t best_prog{};
+        float best_score = -1.f, best_z = 0.f, best_depth = 0.f;
+        int best_point = -1, hits = 0;
         for (int visit = 0; visit < n_progs && landing_in_reach && !s_psaPlan.active && !s_psaPending && !c.out_of_budget; ++visit)
         {
             last = (s_resume + visit) % n_progs;
@@ -2090,7 +2234,26 @@ static void PS_AssistTick(void* pLocal, UserCmd_t* pCmd, bool bPredicted)
                 }
                 r = std::move(v);
             }
-            take(prog, r, targets[r.target].point, targets[r.target].z);
+            const n_assist::target_t& tg = targets[r.target];
+            const float top   = tg.grid ? tg.plane + 0.03125f : tg.z + 0.01f;
+            const float score = cssm::PsRideScore(top, r.arrive_z, r.arrive_xy);
+            ++hits;
+            if (score > best_score)
+            {
+                best_score = score;
+                best_depth = top - r.arrive_z;
+                best_prog  = prog;
+                best_point = tg.point;
+                best_z     = tg.z;
+                best       = std::move(r);
+            }
+        }
+        if (best_score >= 0.f)
+        {
+            s_psaPending = false;   // a verify cut short this tick is moot once a scored hit is flown
+            DebugLog("[psa] pick of %d hits depth=%.4f (~%d ticks) xy=%.1f", hits, best_depth,
+                     (int)(best_depth / (n_tick::engine_interval() / 32.f)), best.arrive_xy);
+            take(best_prog, best, best_point, best_z);
         }
         if (!c.out_of_budget) s_resume = 0;
         else if (last >= 0) s_resume = last;

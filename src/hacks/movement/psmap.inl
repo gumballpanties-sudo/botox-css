@@ -34,7 +34,13 @@
 // never looked at have nothing to be weighed against.
 //
 // Not found here, by construction: displacement walls and prop surfaces (neither is a brush),
-// and seams on faces more than ~11 degrees off vertical (k_psMapMaxNz).
+// brush entities (func_brush & co are not in the world BSP GetBrushesInAABB walks), and faces
+// past |nz| 0.7 (k_psMapMaxNz -- floors, the finder's own bound).
+//
+// THE 3D SKYBOX IS SKIPPED. It is real brushwork in the same BSP, a 1/16 scale copy of the
+// scenery, and every wall in it has a top edge: lines out in the void past the map. The engine
+// keeps it in its own AREA (m_skybox3d.area, 255 = map has none), so one leaf->area lookup per
+// seam drops it before a single sim is spent (PmBuildSeams).
 
 // ---- state (movement thread only, except the two atomics the menu button sets) --------------
 static std::vector<PsMapSeam> s_pmSeams;    // candidates for this map, built once per scan
@@ -93,22 +99,108 @@ static void PmAbort()
 }
 
 // ---- candidates: every brush in the map, once ------------------------------------------------
-// One GetBrushesInAABB over the whole world. The engine walks its own BSP for this, so it is one
-// hitch on the button press (logged as build=), not something to spread over ticks: the sims
-// after it are 99% of the work and those ARE spread.
-static void PmBuildSeams()
+// GetBrushesInAABB over the whole world, in tiles (PmBuildSeams). The engine walks its own BSP
+// for this, so it is one hitch on the button press (logged as build=), not something to spread
+// over ticks: the sims after it are 99% of the work and those ARE spread.
+static int s_pmSky = 0;                     // seams dropped as 3D skybox, per scan
+
+// ---- the 3D skybox: its own BSP area, never a place you stand --------------------------------
+// m_skybox3d.area is the area the server put the sky_camera in (255 = the map has no 3D sky).
+// Asked at three points of the seam, the two spots a hull riding it occupies: just off the face
+// at the edge, and PmSpotUsable's hip spot. Any of them in the sky area = the whole seam is
+// skybox brushwork (the area is sealed, a seam cannot straddle it). A spot buried in a brush
+// sits in a solid leaf (area 0) and is not mistaken for sky.
+// Gate armed only when the player's own spot answers with a real area that is NOT the sky's:
+// standing in the skybox (noclip) or a query that cannot answer leaves every seam in.
+static int PmSkyArea(void* pLocal)
+{
+    if (g_offSkyArea <= 0) return -1;
+    const int sky = *reinterpret_cast<const int*>(reinterpret_cast<const char*>(pLocal) + g_offSkyArea);
+    if (sky < 0 || sky >= 255) return -1;
+    const int own = MV_PointArea(EntV3(pLocal, g_offOrigin) + Vec3(0.f, 0.f, 40.f));
+    if (own <= 0 || own == sky)   // area 0 = solid / outside, never where you stand
+    {
+        DebugLog("PMAP: skybox gate OFF -- sky area %d, your area %d", sky, own);
+        return -1;
+    }
+    return sky;
+}
+
+static bool PmSeamInSky(const PsMapSeam& s, int sky)
+{
+    const Vec3 n(s.nx, s.ny, 0.f);
+    static const float kT[3] = { 0.15f, 0.5f, 0.85f };
+    for (float t : kT)
+    {
+        const Vec3 at(s.ax + (s.bx - s.ax) * t, s.ay + (s.by - s.ay) * t, s.z);
+        if (MV_PointArea(at + n * 4.f + Vec3(0.f, 0.f, 4.f)) == sky) return true;
+        if (MV_PointArea(at + n * 26.f + Vec3(0.f, 0.f, 36.f)) == sky) return true;
+    }
+    return false;
+}
+
+// ---- TILED, NOT ONE BOX ----------------------------------------------------------------------
+// GetBrushesInAABB walks the tree through CM_BoxLeafnums' 1024 slot node ring (engine cmodel.cpp
+// NODELIST_MAX). One whole-world box splits at nearly every node, overflows the ring, and the walk
+// quits early without a word: de_nuke handed back 3016 of its 6579 brushes, and a replay of that
+// exact walk on the .bsp gives the same 3016. Half the map was never a candidate -- the "doesn't
+// find all surfs" report. Of 330 installed csgo/tf2/css maps 64 lose brushes as one box (53 of
+// 244 tf2 maps; cp_premuda keeps 64 of 5079); 2048u tiles lose none, worst ring peak 524 of 1024
+// (csgo/tools/pf_map_tiles_check.py replays the walk on the .bsp files).
+// A brush touching several tiles is kept by the one holding its AABB min corner (the bevels make
+// every brush list its axial planes), so it is cut into seams once.
+// ponytail: fixed grid, halve k_pmTile if a map ever fails that check
+static constexpr float k_pmWorld = 16384.f;  // Source's world limit
+static constexpr float k_pmTile  = 2048.f;
+
+static bool PmOwnsBrush(const FmPlane* p, int np, const float lo[3])
+{
+    for (int k = 0; k < 3; ++k)
+    {
+        float c = 0.f;
+        bool have = false;
+        for (int i = 0; i < np; ++i)
+        {
+            const float n = k == 0 ? p[i].nx : k == 1 ? p[i].ny : p[i].nz;
+            if (n < -0.9999f && (!have || -p[i].d > c)) { c = -p[i].d; have = true; }
+        }
+        if (!have) continue;    // no axial plane on this axis: every tile keeps it, merge dedupes
+        if (c < lo[k] && lo[k] > -k_pmWorld) return false;
+        if (c >= lo[k] + k_pmTile && lo[k] + k_pmTile < k_pmWorld) return false;
+    }
+    return true;
+}
+
+static void PmBuildSeams(void* pLocal)
 {
     s_pmSeams.clear();
     s_pmBrushes = 0;
-    // Source's world limit is +/-16384; HL2/TF2 maps never reach it
-    const float mn[3] = { -16400.f, -16400.f, -16400.f };
-    const float mx[3] = {  16400.f,  16400.f,  16400.f };
-    FM_Brushes(mn, mx, [&](const FmPlane* p, int np) {
-        s_pmBrushes++;
-        PsMap_BrushSeams(p, np, s_pmSeams);
-        return s_pmSeams.size() > 400000;   // runaway guard, never reached on a real map
-    }, 1 << 20);
+    s_pmSky = 0;
+    for (float x = -k_pmWorld; x < k_pmWorld; x += k_pmTile)
+    for (float y = -k_pmWorld; y < k_pmWorld; y += k_pmTile)
+    for (float z = -k_pmWorld; z < k_pmWorld; z += k_pmTile)
+    {
+        if (s_pmSeams.size() > 400000) break;   // runaway guard, never reached on a real map
+        const float mn[3] = { x, y, z };
+        const float mx[3] = { x + k_pmTile, y + k_pmTile, z + k_pmTile };
+        FM_Brushes(mn, mx, [&](const FmPlane* p, int np) {
+            if (!PmOwnsBrush(p, np, mn)) return false;
+            s_pmBrushes++;
+            PsMap_BrushSeams(p, np, s_pmSeams);
+            return s_pmSeams.size() > 400000;
+        }, 1 << 20);
+    }
     PsMap_Merge(s_pmSeams);
+
+    // after the merge: a row of skybox brushes is one lookup set, not eight
+    const int sky = PmSkyArea(pLocal);
+    if (sky >= 0)
+    {
+        const size_t before = s_pmSeams.size();
+        s_pmSeams.erase(std::remove_if(s_pmSeams.begin(), s_pmSeams.end(),
+                        [&](const PsMapSeam& s) { return PmSeamInSky(s, sky); }), s_pmSeams.end());
+        s_pmSky = (int)(before - s_pmSeams.size());
+    }
 }
 
 // ---- one sample: is there a pixel surf standing here -----------------------------------------
@@ -128,18 +220,26 @@ static void PmBuildSeams()
 //     seam, it is a second brush (or a clip) standing in front of the spot, and no hull rides a
 //     lip buried in one. That branch is a straight source of the "surfs inside walls" report.
 //     Per height, so a lip at the base does not condemn the two heights above it.
+// LEANING WALLS (k_psMapMaxNz is the finder's 0.7 now): the ray is centred where the face IS at
+// that height (s.lean per unit up), not where it is at the seam, or a wall leaning back 45
+// degrees is 16u behind the ray's far end at the top height and an overhang starts the ray
+// inside itself. The normal test compares the xy directions: a leaning face's 3D normal has an
+// xy part shorter than 1 and never passed dot > 0.9 against the unit seam normal.
 static bool PmWallAbove(const PsMapSeam& s, const Vec3& at, TraceFilterWorldProps& filter)
 {
     static const float kUp[3] = { 2.f, 6.f, 16.f };
     const Vec3 n(s.nx, s.ny, 0.f);
     for (int i = 0; i < 3; ++i)
     {
-        const Vec3 mid = at + Vec3(0.f, 0.f, kUp[i]);
+        const Vec3 mid = at + Vec3(0.f, 0.f, kUp[i]) - n * (s.lean * kUp[i]);
         GameTrace_t tr{};
         TraceLine(mid + n * 8.f, mid - n * 8.f, MASK_PLAYERSOLID, &filter, &tr);
         if (tr.startsolid || tr.fraction >= 1.f) continue;
         // ...and it has to be THIS wall, not some unrelated face the ray found on the way
-        if (tr.plane.normal.x * s.nx + tr.plane.normal.y * s.ny <= 0.9f) continue;
+        Vec3 hn(tr.plane.normal.x, tr.plane.normal.y, 0.f);
+        if (hn.Length2D() < 0.1f) continue;
+        hn.Normalize();
+        if (hn.x * s.nx + hn.y * s.ny <= 0.9f) continue;
         return true;
     }
     return false;
@@ -281,7 +381,8 @@ static void PixelMapScan(void* pLocal, UserCmd_t* pCmd)
         }
         LARGE_INTEGER f{}, a{}, b{};
         QueryPerformanceFrequency(&f); QueryPerformanceCounter(&a);
-        PmBuildSeams();
+        MV_ValidateOutsideWorld(EntV3(pLocal, g_offOrigin) + Vec3(0.f, 0.f, 40.f));
+        PmBuildSeams(pLocal);
         QueryPerformanceCounter(&b);
         const double build = double(b.QuadPart - a.QuadPart) * 1000.0 / double(f.QuadPart);
         s_pmSeam = 0; s_pmSample = 0; s_pmSamples = 0;
@@ -291,8 +392,8 @@ static void PixelMapScan(void* pLocal, UserCmd_t* pCmd)
         s_pmDoneSeams = 0;
         s_pmTotalSeams = (int)s_pmSeams.size();
         s_pmBusy = !s_pmSeams.empty();
-        DebugLog("PMAP: %s -- %d brush(es) -> %d seam(s) in %.1f ms, stride %.0f",
-                 EngineLevelName(), s_pmBrushes, (int)s_pmSeams.size(), build, s_pmStride);
+        DebugLog("PMAP: %s -- %d brush(es) -> %d seam(s) (%d skybox dropped) in %.1f ms, stride %.0f",
+                 EngineLevelName(), s_pmBrushes, (int)s_pmSeams.size(), s_pmSky, build, s_pmStride);
         if (!s_pmBusy)
             DebugLog("PMAP: nothing to scan -- no brush wall faces found (GetBrushesInAABB "
                      "returned %d brushes)", s_pmBrushes);

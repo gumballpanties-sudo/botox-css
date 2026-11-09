@@ -1,5 +1,6 @@
 #include "menu_internal.h"
 #include "../misc/minesweeper.h"   // fpsoverlay minesweeper window (botox menu.cpp:1020)
+#include "../visuals/esp_preview.h"   // g_espPreview, EspPreview::DrawBody/kWidth/kHeight
 
 
 // ==== tooltips: OFF ==============================================================
@@ -970,7 +971,56 @@ void RenderMenu()
 
     ImGui::End();
 
+    // own window right of the menu, visuals > esp page only, menu band look: botox csgo-sdk
+    // hacks/menu/menu.cpp ~1024-1057 (g_esp_preview.draw_body()). Fades with the menu: render.cpp SplitDrawData.
+    float sideX = wp.x + wz.x + 10.f;
+    if (s_tab == TAB_VISUALS && s_visualsSub == 0 && !s_search[0] && g_espPreview)
+    {
+        const float padding = st.WindowPadding.x;
+        const ImVec2 size(EspPreview::kWidth + padding * 2.f, mf::kHeaderH + EspPreview::kHeight + padding * 2.f);
+
+        ImGui::SetNextWindowPos(ImVec2(sideX, wp.y), ImGuiCond_Always);
+        ImGui::SetNextWindowSize(size, ImGuiCond_Always);
+
+        // this imgui fork defaults WindowMinSize to 300 wide: the window grew past the band + outline
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowMinSize, ImVec2(1.f, 1.f));
+        const bool open = ImGui::Begin("botox-esp-preview", nullptr,
+                          ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoScrollbar |
+                              ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove |
+                              ImGuiWindowFlags_NoSavedSettings | (s_animProgress < 0.999f ? ImGuiWindowFlags_NoInputs : 0));
+        ImGui::PopStyleVar();
+        if (open)
+        {
+            ImDrawList* pdl = ImGui::GetWindowDrawList();
+            const ImVec2 pp = ImGui::GetWindowPos();
+
+            // band, like the root window's top band above (kBandBg/rnd reused from there)
+            pdl->PushClipRect(pp, ImVec2(pp.x + size.x, pp.y + mf::kHeaderH), false);
+            pdl->AddRectFilled(pp, ImVec2(pp.x + size.x, pp.y + mf::kHeaderH), kBandBg(), rnd, ImDrawFlags_RoundCornersTop);
+            pdl->PopClipRect();
+            RenderFadedGradientLine(pdl, ImVec2(pp.x, pp.y + mf::kHeaderH - 1.f), ImVec2(size.x, 1.f), ImColor(Accent()));
+
+            ImGui::PushFont(BoldFont());
+            const char* title = "esp preview";
+            const ImVec2 titleSize = ImGui::CalcTextSize(title);
+            pdl->AddText(ImVec2(pp.x + (size.x - titleSize.x) * 0.5f, pp.y + (mf::kHeaderH - titleSize.y) * 0.5f),
+                         ImGui::GetColorU32(ImGuiCol_Text), title);
+            ImGui::PopFont();
+
+            ImGui::SetCursorPos(ImVec2(padding, mf::kHeaderH + padding));
+            EspPreview::DrawBody();
+
+            // window outline last, over everything else in the window
+            pdl->PushClipRect(pp, ImVec2(pp.x + size.x, pp.y + size.y), false);
+            pdl->AddRect(pp, ImVec2(pp.x + size.x, pp.y + size.y), kWindowBorder(), rnd);
+            pdl->PopClipRect();
+        }
+        ImGui::End();
+
+        sideX += size.x + 10.f;
+    }
+
     // own window, still in the style scope: menu colours + font, fades with the menu (render.cpp SplitDrawData)
     const MsSettings ms = { &g_msOpen, &g_msNight, &g_msDiff, &g_msWidth, &g_msHeight, &g_msMines };
-    Minesweeper_Draw(ms, BoldFont(), g_fontMs19, s_animProgress >= 0.999f, ImVec2(wp.x + wz.x + 10.f, wp.y));
+    Minesweeper_Draw(ms, BoldFont(), g_fontMs19, s_animProgress >= 0.999f, ImVec2(sideX, wp.y));
 }

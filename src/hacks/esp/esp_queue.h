@@ -200,3 +200,11 @@ namespace EspQ
         out.srcW = f->srcW; out.srcH = f->srcH;
     }
 }
+
+struct ImDrawList;
+// render.cpp: replays a copied-out EspFrame's commands into dl (font / text-look / avatar + weapon
+// icon lookup are render.cpp statics). RenderEspQueue's own replay of the live frame; esp preview's
+// DrawBody calls it a second time for its own EspFrame, after CopyFrame-ing/building one the same
+// way. No rescale here -- that's RenderEspQueue's engine-pixels-to-ImGui-DisplaySize step, done by
+// its caller, not this.
+void EspQ_ReplayFrame(ImDrawList* dl, const EspFrame& f);

@@ -277,9 +277,10 @@ static WeWsOut WeWallStuck(void* pLocal, UserCmd_t* cmd, WeWsState& st, bool slo
 // ====================================================================================================
 // per-second diag (WEPH line): air = air ticks planned, lands = plans sent (own = your own cmd landed),
 // steer = landed on a PH wish, nowall = face find failed, tb = TB fallback wrote, hops = jumps sent
-static struct { bool hopped = false; int roll = 0; bool hit = false; bool armed = false; we::PhPlan last{};
+// reach = steered onto a land > 3 ticks out (reach pass), rcut = its clock ran out mid-grid
+static struct { bool hopped = false; int roll = 0, reachRoll = 0; bool hit = false; bool armed = false; we::PhPlan last{};
                 int sims = 0, lands = 0, hops = 0, air = 0, pin = 0, nowall = 0, steps = 0, pinLands = 0,
-                    own = 0, steer = 0, tb = 0, cut = 0, floor = 0; } s_wePh;
+                    own = 0, steer = 0, tb = 0, cut = 0, floor = 0, reach = 0, rcut = 0; } s_wePh;
 static const char* s_wePhStage = "";   // which candidate grounded (land log)
 // last land sent: the cmd as PH wrote it + the END its sim gave. Next cmd checks the engine's copy and START
 static struct { int cmd = -1; UserCmd_t c{}; Vec3 endO{}; float endVz = 0.f; } s_wePhSent;
@@ -289,6 +290,10 @@ static float s_wePhEndVz = 0.f;
 // (~2.5 ms at ~9 us/sim), so this cap only bites on a perf spike.
 // ponytail: 5 ms safety cap. `WEPH: ... cut=` > 0 = it bit, raise it
 constexpr long long k_wePhClockUs = 5000;
+// ponytail: reach grid 2 ms/cmd (~60 sims at the logged ~30 us), rolled across cmds. `rcut=` every tick
+// with reach=0 = the grid never finishes a lap in time, raise it
+constexpr long long k_wePhReachUs = 2000;
+static const char* const k_wePhStageSticky = "steer last";   // reach/face3 plan re-flown (land log stays quiet)
 
 static void WeSetMoveKeys(UserCmd_t& c)
 {
@@ -401,8 +406,10 @@ static Vec3  s_wePhSimO{};   // END of the last grounded WePhwSim (the planner k
 static float s_wePhSimVz = 0.f;
 
 // ref fly plan `p` from START for up to `horizon` ticks; found = FL_ONGROUND on tick `ticks`,
-// speed = xy speed there. Leaves the entity wherever the sim stopped (the caller restores)
-static bool WePhwSim(void* pLocal, int nBase, const UserCmd_t& base, we::PhPlan& p, int horizon)
+// speed = xy speed there. Leaves the entity wherever the sim stopped (the caller restores).
+// ownFound/ownZ (not ref): stop once the hull can only land at or under your own floor (we::PhCantRise)
+static bool WePhwSim(void* pLocal, int nBase, const UserCmd_t& base, we::PhPlan& p, int horizon,
+                     bool ownFound = false, float ownZ = 0.f)
 {
     p.found = false;
     RestoreToFrame(nBase - 1);
@@ -422,6 +429,7 @@ static bool WePhwSim(void* pLocal, int nBase, const UserCmd_t& base, we::PhPlan&
             s_wePhSimO = EntV3(pLocal, g_offOrigin); s_wePhSimVz = EntV3(pLocal, g_offVelocity).z;
             break;
         }
+        if (t < horizon && we::PhCantRise(ownFound, ownZ, EntV3(pLocal, g_offOrigin).z, EntV3(pLocal, g_offVelocity).z)) break;
     }
     return p.found;
 }
@@ -439,7 +447,7 @@ static we::PhPlan WePhwPlan(void* pLocal, int nBase, const UserCmd_t& cmd)
     bool ownFound = false; float ownZ = 0.f;   // where your own move lands (set after the own passes)
     // true = stop searching (a landing keeps your speed)
     const auto offer = [&](we::PhPlan k, int horizon, bool byTicks, const char* tag) {
-        if (WePhwSim(pLocal, nBase, cmd, k, horizon))
+        if (WePhwSim(pLocal, nBase, cmd, k, horizon, ownFound, ownZ))
         {
             if (we::PhSameFloor(ownFound, ownZ, s_wePhSimO.z)) ++s_wePh.floor;
             else if (we::PhBetter(k, best, byTicks)) { best = k; s_wePhStage = tag; s_wePhEndO = s_wePhSimO; s_wePhEndVz = s_wePhSimVz; }
@@ -456,31 +464,63 @@ static we::PhPlan WePhwPlan(void* pLocal, int nBase, const UserCmd_t& cmd)
     if (!done) done = offer(own, 1, false, "own duck");
     if (!done && s_wePh.last.found) done = offer(s_wePh.last, 1, false, "last");
     if (done) return best;
-    // own move flown 6 ticks (> the 3-tick pass): its floor is what every steered plan must beat
+    const bool reach  = g_phReach;
+    const int  reachN = std::clamp(g_phReachTicks, 4, 32);
+    // own move flown 6 ticks (> the 3-tick pass; reach: past its horizon): its floor is what every steered
+    // plan must beat, and the floor the steered sims prune against
     {
         we::PhPlan ref;
-        ownFound = WePhwSim(pLocal, nBase, cmd, ref, 6);
+        ownFound = WePhwSim(pLocal, nBase, cmd, ref, reach ? reachN + 6 : 6);
         ownZ = s_wePhSimO.z;
     }
-
-    RestoreToFrame(nBase - 1);
-    const WeWall wall = WeFindWallLines(pLocal, s_prePredOrigin, 0.f);
-    const float velYaw = RAD2DEGF(atan2f(v.y, v.x));
-    if (!wall.ok)
+    // reach sticky: last cmd's multi-tick steer still lands = keep flying it, skip every grid
+    if (reach && s_wePh.last.found && s_wePh.last.ticks > 1)
     {
-        ++s_wePh.nowall;
-        for (const float off : we::k_phwVelOff) for (const float mv : we::k_phwVelMove) for (const int d : we::k_phwDuck)
-            if (expired() || offer(wish(velYaw + off, mv, d), 1, false, "vel")) { s_wePh.cut += cut; return best; }
-        return best;
+        offer(s_wePh.last, reachN, true, k_wePhStageSticky);
+        if (best.found) return best;
     }
-    const float sign = we::PhwSign(velYaw, wall.yaw);
-    for (const float off : we::k_phwOff) for (const float mv : we::k_phwMove) for (const int d : we::k_phwDuck)
-        if (expired() || offer(wish(wall.yaw + sign * off, mv, d), 1, false, "face")) { s_wePh.cut += cut; return best; }
-    if (best.found) return best;
-    for (const float off : we::k_phwOff3) for (const float mv : we::k_phwMove3) for (const int d : we::k_phwDuck)
+
+    // ref passes (land now / within 3). Rising too fast to ground inside 3 ticks = only reach can land
+    const float velYaw = RAD2DEGF(atan2f(v.y, v.x));
+    const auto nearPasses = [&]() {
+        RestoreToFrame(nBase - 1);
+        const WeWall wall = WeFindWallLines(pLocal, s_prePredOrigin, 0.f);
+        if (!wall.ok)
+        {
+            ++s_wePh.nowall;
+            for (const float off : we::k_phwVelOff) for (const float mv : we::k_phwVelMove) for (const int d : we::k_phwDuck)
+                if (expired() || offer(wish(velYaw + off, mv, d), 1, false, "vel")) return;
+            return;
+        }
+        const float sign = we::PhwSign(velYaw, wall.yaw);
+        for (const float off : we::k_phwOff) for (const float mv : we::k_phwMove) for (const int d : we::k_phwDuck)
+            if (expired() || offer(wish(wall.yaw + sign * off, mv, d), 1, false, "face")) return;
+        if (best.found) return;
+        for (const float off : we::k_phwOff3) for (const float mv : we::k_phwMove3) for (const int d : we::k_phwDuck)
+        {
+            if (expired()) return;
+            offer(wish(wall.yaw + sign * off, mv, d), 3, true, "face3");
+        }
+    };
+    if (we::PhCanLand(v.z, WeHalfGrav(), 3)) { nearPasses(); s_wePh.cut += cut; }
+    if (best.found || !reach) return best;
+
+    // reach: held wish off your velocity (view yaw when too slow to have one), least turn first, first land
+    // above your own floor wins. Own clock: the grids above may have spent theirs; the grid rolls on next cmd
+    LARGE_INTEGER q1{}; QueryPerformanceCounter(&q1);
+    const long long rspan  = f0.QuadPart * k_wePhReachUs / 1000000ll;
+    const float baseYaw = speed0 >= 30.f ? velYaw : cmd.viewangles.y;
+    const int   flip    = (cmd.buttons & IN_DUCK) ? 2 : 1;
+    for (int n = 0; n < we::k_phReachSteps; ++n)
     {
-        if (expired()) { ++s_wePh.cut; return best; }
-        offer(wish(wall.yaw + sign * off, mv, d), 3, true, "face3");
+        LARGE_INTEGER q{}; QueryPerformanceCounter(&q);
+        if (q.QuadPart - q1.QuadPart > rspan) { ++s_wePh.rcut; break; }
+        const int i = s_wePh.reachRoll;
+        s_wePh.reachRoll = (i + 1) % we::k_phReachSteps;
+        const we::PhReachStep s = we::PhReachAt(i, g_phReachAngle);
+        if (s.skip) continue;
+        offer(wish(baseYaw + s.off, 450.f, s.flipDuck ? flip : 0), reachN, true, "reach");
+        if (best.found) { s_wePh.reachRoll = 0; ++s_wePh.reach; break; }   // next search starts at least turn
     }
     return best;
 }
@@ -496,11 +536,11 @@ static void WePixelHop(void* pLocal, UserCmd_t* cmd)
             s_sec = sec;
             // printed on any search, so "never lands" still leaves a line saying why
             if (g_debugLogEnable && (s_wePh.lands || s_wePh.hops || s_wePh.air))
-                DebugLog("WEPH: lands=%d own=%d steer=%d pinLands=%d hops=%d air=%d pin=%d nowall=%d tb=%d cut=%d floor=%d sims=%d",
+                DebugLog("WEPH: lands=%d own=%d steer=%d pinLands=%d hops=%d air=%d pin=%d nowall=%d tb=%d cut=%d floor=%d reach=%d rcut=%d sims=%d",
                          s_wePh.lands, s_wePh.own, s_wePh.steer, s_wePh.pinLands, s_wePh.hops, s_wePh.air, s_wePh.pin,
-                         s_wePh.nowall, s_wePh.tb, s_wePh.cut, s_wePh.floor, s_wePh.sims);
+                         s_wePh.nowall, s_wePh.tb, s_wePh.cut, s_wePh.floor, s_wePh.reach, s_wePh.rcut, s_wePh.sims);
             s_wePh.lands = s_wePh.own = s_wePh.steer = s_wePh.pinLands = s_wePh.hops = s_wePh.air = s_wePh.pin = 0;
-            s_wePh.nowall = s_wePh.tb = s_wePh.cut = s_wePh.floor = s_wePh.sims = 0;
+            s_wePh.nowall = s_wePh.tb = s_wePh.cut = s_wePh.floor = s_wePh.reach = s_wePh.rcut = s_wePh.sims = 0;
         }
     }
     const bool key = g_pixelHop && MovementKeyOK(g_pixelHopKey, g_pixelHopMode) && EntAlive(pLocal);
@@ -568,22 +608,24 @@ static void WePixelHop(void* pLocal, UserCmd_t* cmd)
     ++s_wePh.air;
     const bool pinned = we::PhPinned(s_prePredVel.z, WeHalfGrav());
     if (pinned) ++s_wePh.pin;
-    if (!we::PhCanLand(s_prePredVel.z, WeHalfGrav())) return;   // rising too fast to ground inside the horizon
+    // rising too fast to ground inside the horizon (reach: its N ticks, a jump onto a box top)
+    if (!we::PhCanLand(s_prePredVel.z, WeHalfGrav(), g_phReach ? std::clamp(g_phReachTicks, 4, 32) : 3)) return;
     const we::PhPlan plan = WePhwPlan(pLocal, nBase, *cmd);
     RestoreToFrame(nBase - 1);
     if (plan.found)
     {
         WePhwApply(*cmd, plan);
         s_wePh.last = plan.keep ? we::PhPlan{} : plan;   // ref stores a kept own move as "no plan"
-        // a land you steered into yourself (a plain fall) is not a hop: space still gates that one
-        s_wePh.armed = s_wePh.armed || !plan.keep || pinned;
+        // a land you steered into yourself (a plain fall) is not a hop: space still gates that one.
+        // Armed on the land cmd only: a reach steer that later misses must not auto-hop you off the floor
+        s_wePh.armed = s_wePh.armed || ((!plan.keep || pinned) && plan.ticks == 1);
         s_pixelHopHit = true;
         ++s_wePh.lands;
         ++(plan.keep ? s_wePh.own : s_wePh.steer);
         if (pinned) ++s_wePh.pinLands;
-        if (!plan.keep || pinned)
+        if (!plan.keep || pinned) AT_Stamp(*cmd, "ph");
+        if ((!plan.keep || pinned) && s_wePhStage != k_wePhStageSticky)   // a held steer logs once, at its find
         {
-            AT_Stamp(*cmd, "ph");
             DebugLog("WEPH: land by=%s t=%d pin=%d z=%.3f vz=%.2f xy=%.1f -> %.1f yaw=%.2f move=%.3f duck=%d",
                      s_wePhStage, plan.ticks, pinned ? 1 : 0, s_prePredOrigin.z, s_prePredVel.z, s_prePredVel.Length2D(),
                      plan.speed, plan.yaw, plan.move, plan.duck);

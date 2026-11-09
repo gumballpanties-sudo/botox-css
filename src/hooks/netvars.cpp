@@ -154,6 +154,7 @@ int g_offViewOffset    = 0;  // m_vecViewOffset[0] (DT_BasePlayer localdata) -- 
 int g_offItemDefIndex  = 0;  // m_iItemDefinitionIndex (DT_EconEntity m_AttributeManager.m_Item) -- Atomizer detect
 int g_offTeamNum       = 0;  // m_iTeamNum (DT_BaseEntity) -- team brush pass-through in the trace filter
 int g_offCollGroup     = 0;  // m_CollisionGroup (DT_BaseEntity) -- buildings stay solid to both teams
+int g_offSkyArea       = 0;  // m_Local.m_skybox3d.area (DT_Local, int, 255 = no 3D sky) -- map scan skips it
 // m_flSimulationTime / m_iObserverMode / m_hObserverTarget / m_flDuckJumpTime were resolved here
 // and read by nothing but the DebugLog below. Three belonged to the deleted interp removal; the
 // fourth is named for a mini jump gate that never used it. Four FindPropOffset table walks gone.
@@ -201,6 +202,7 @@ void Movement_ResolveExtraNetvars()
     g_offItemDefIndex  = find(FindNetworkTable("DT_EconEntity"), "m_iItemDefinitionIndex");
     g_offTeamNum       = find(pBase, "m_iTeamNum");
     g_offCollGroup     = find(pBase, "m_CollisionGroup");
+    g_offSkyArea       = find(pCSPlayer, "m_skybox3d.area");   // generic CPlayerLocalData prop
 
     s_done = true;
     DebugLog("movement netvars: org=0x%X vel=0x%X mins=0x%X maxs=0x%X maxspd=0x%X tickbase=0x%X constraint=0x%X water=0x%X scale=0x%X team=0x%X collgrp=0x%X",

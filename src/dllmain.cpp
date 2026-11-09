@@ -631,6 +631,7 @@ bool g_wcPreventSlow = true;  bool g_wcDuck = true;   // botox wall climb defaul
 bool g_wcViz = false;  float g_wcVizColor[4] = { 1.f, 190 / 255.f, 90 / 255.f, 1.f };
 bool g_airStuck = false;    int g_airStuckKey = 0;    int g_airStuckMode = 1;
 bool g_pixelHop = false;    int g_pixelHopKey = 0;    int g_pixelHopMode = 1;
+bool g_phReach = true;      int g_phReachTicks = 10;  float g_phReachAngle = 60.f;
 
 // -- Unit A port (movement_ex.inl): small tricks from botox csgo-sdk, defaults OFF ---------------
 bool g_nulls = false;
@@ -683,6 +684,7 @@ bool  g_psFinderTb = true;      // run the texturebug seam pass too (the red rin
 bool  g_psFinderNoProps = true; // props are not map geometry -- finder traces refuse them
 bool  g_psFinderLength = true;  // walk found surfs along the wall, draw their length
 bool  g_psMapLines = true;      // draw the whole-map scan's lines (own switch, not the finder's)
+float g_psMapMaxDist = 0.f;     // map-scan marks farther than this from you not drawn (0 = no limit)
 float g_psFinderBudget = 16.f;  // ms per cmd the chunked finder scan may spend (;
                                 // raised 2 -> 16: the scan no longer shares the TB clock, so this
                                 // is the whole bound. A sim measures ~8.8us in the log, so
@@ -736,6 +738,7 @@ std::atomic<int> g_prMenuReq{0};
 
 // -- Unit C: ESP (src/hacks/aim/esp.cpp, extern list hacks/esp/esp_vars.h) -- botox defaults --
 bool  g_espEnable = false;
+bool  g_espPreview = false;   // visuals > esp "esp preview" checkbox, src/hacks/visuals/esp_preview.h
 bool  g_espTeammates = false;
 float g_espMaxDistance = 0.f;
 bool  g_espDistanceFade = false;

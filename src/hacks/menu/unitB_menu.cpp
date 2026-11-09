@@ -3,6 +3,7 @@
 #include "../hud/indicators.h"
 #include "../movement/detections.h"
 #include "../movement/ps_lines.h"
+#include "../movement/movement.h"   // PS_ClearTrajectory
 #include "../movement/recorder.h"
 #include "menu_chrome.h"   // menu_columns_* / menu_group_*
 #include <cstdio>
@@ -332,9 +333,10 @@ void UnitB_Menu_movement_detections()
             ImGui::ColorRow("line color##pslinecolor", g_psLinesColor);
             ImGui::Combo("line style##pslinestyle", &g_psLinesStyle, "full lines\0dotted lines\0dots\0");
             ImGui::SliderFloat("line thickness##pslinethick", &g_psLinesThickness, 0.5f, 10.f, "%.1f");
-            ImGui::Checkbox("full trajectory", &g_psLinesFull);
-            if (g_psLinesFull)
-                ImGui::ColorRow("full trajectory color##psl", g_psLinesFullColor);
+            // 11-09: "full trajectory" removed (lines are finder-walked, see ps_lines.h); lines stay
+            // per map, so this is the reset
+            if (ImGui::Button("clear lines##psl"))
+                PS_ClearTrajectory();
         }, ImVec2(220.f, -1));
 }
 

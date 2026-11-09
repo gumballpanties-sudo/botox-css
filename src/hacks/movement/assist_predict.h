@@ -258,6 +258,7 @@ namespace n_assist
         int target  = -1;
         int arrival = -1, launch = -1, landing = -1;
         float arrive_z  = 0.f;
+        float arrive_xy = 0.f;   // engine hit only (the analytic branch leaves 0, its full re-run sets it)
         float gap       = 1e9f;
         float end_z     = 0.f;
         bool end_ground = false;
@@ -489,6 +490,7 @@ namespace n_assist
                     r.target  = t;
                     r.arrival = i;
                     r.arrive_z = static_cast<float>(s.z);
+                    r.arrive_xy = EntV3(pLocal, g_offVelocity).Length2D();   // state = after tick i (probe undone)
                     return r;
                 }
             }

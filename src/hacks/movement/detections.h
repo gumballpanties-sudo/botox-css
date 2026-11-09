@@ -16,6 +16,8 @@ struct DetTick
     float vz = 0.f, speed = 0.f, gravity = 800.f, interval = 0.015f;
     int   tick = 0;
     bool  tb = false, as = false, ps = false, wc = false;
+    bool  tbOwns = false;   // TB steered the cmd without a hit (park/hold) -- EB veto only
+
 };
 void Detections_Tick(const DetTick& t);
 

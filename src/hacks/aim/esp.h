@@ -1,7 +1,11 @@
 #pragma once
 #include "sdk.h"
 #include "css.h"       // CCSPlayer / CWeaponCSBase / CPlantedC4 / CCSPlayerResource, CSWeaponID
+#include "../esp/esp_vars.h"   // EF_COUNT -- EspPlayer::m_flags size
 #include <array>
+#include <cstdint>
+#include <string>
+#include <vector>
 
 // Player + world esp = botox hacks/visuals/players/players.cpp + edicts/edicts.cpp +
 // grenade/grenade_path.cpp + players/sound_esp/sound_esp.cpp, ported 1:1 onto the CSS SDK
@@ -15,6 +19,41 @@
 // that never matches a CS:S client class -- IsPlayer() always returns false for a CCSPlayer.
 // DrawPlayers below therefore walks entindex 1..maxplayers directly (GetClientEntity) instead
 // of H::Entities.GetGroup(PlayerAll)/IsPlayer(), which depends on that same broken check.
+
+// botox n_players::esp_player_t, ported 1:1 onto the CSS gather. Everything CEsp::DrawPlayer
+// reads, gathered from the entity (CEsp::DrawPlayers) or made up (esp preview, on a fake
+// player). DrawPlayer must never read H::Entities / pLocal / I::EngineClient: every number it
+// needs lives here. esp.h is aim-only (hacks/aim/*.cpp), so this struct is safe to define here
+// rather than in a separate aim-only header -- esp_preview.cpp (the orchestrator's unit, also
+// under hacks/aim/) includes esp.h to fill one of these.
+struct EspPlayer
+{
+	float m_alpha = 1.f;
+	Vec3 m_origin{}, m_mins{}, m_maxs{};   // world hull: ScreenBox (CSS: axis-aligned corners, no view-yaw trim -- ScreenBox never reads I::EngineClient)
+
+	std::string m_name;                    // truncated to 24 + "[bot] " prefix already applied
+	int m_health = 0;
+	float m_healthFactor = 0.f;            // animated health / 100 (CS:S: fixed 100 max hp), clamped 0..1
+	bool m_visible = false;                // visibility trace result (lazy: only run if a vis-colour feature asked)
+	float m_distance = 0.f;
+
+	uint64_t m_steamId = 0;                // 0 = no avatar (bot / lookup failed)
+	CSWeaponID m_weaponId = WEAPON_NONE;   // active weapon id; WEAPON_NONE = no weapon -> WeaponName()/icon skipped
+	bool m_hasAmmo = false;                // active weapon has a clip and the ammo bar is on (bakes in g_espAmmoBar: it also gates the m_flAmmo animation, a shared mutable state update, not just a draw toggle)
+	float m_ammoFactor = 0.f;              // animated clip / max clip, clamped 0..1
+
+	int m_money = 0;                       // Account(); only read by DrawPlayer when g_espFlags + EF_MONEY are both on
+	bool m_flags[EF_COUNT] = {};           // EspFlagBit row shown (all false if g_espFlags is off)
+
+	const studiohdr_t* m_studio = nullptr; // null = no skeleton / hitboxes / backtrack trail / head avatar this player
+	const matrix3x4* m_bones = nullptr;    // caller-owned array (stack local in DrawPlayers); must outlive the DrawPlayer call
+	std::vector<Vec3> m_trail;             // lag compensated trail: world head centre per backtrack record (live: the ring; preview: its fake stream)
+
+	bool m_hasHead = false;                // true only if bones resolved AND the caller's head hitbox was valid
+	Vec3 m_head{}, m_viewRight{};          // world head centre + camera right vector, for the head avatar's screen radius
+	float m_headRadius = 0.f;              // caller picks which hitbox is the head (CS:S set 0: hitbox 12, 0 is the pelvis) -- DrawPlayer only reads this, never an index
+};
+
 class CEsp
 {
 private:
@@ -44,6 +83,9 @@ private:
 public:
 	// aim/hooks.cpp IEngineVGui::Paint, game thread, once a frame
 	void Draw(CCSPlayer* pLocal);
+	// botox n_players::draw_player, split out of DrawPlayers so esp preview can feed it a fake
+	// player. Pure draw: every EspQ:: emission below, no entity / H::Entities / pLocal reads.
+	void DrawPlayer(const EspPlayer& p);
 	// aim/events.cpp player_hurt (our hits only): damage numbers + on-hit hitboxes
 	void OnPlayerHurt(CCSPlayer* pVictim, int iDamage);
 };

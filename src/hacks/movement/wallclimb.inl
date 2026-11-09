@@ -18,7 +18,10 @@
 // slots), and commits tick 1 of the first that goes FL_ONGROUND on that face; next tick re-finds it one shallower. The win
 // arms a hop that the real grounded tick stamps (CheckJumpButton reads the ground state a cmd STARTS on, so the press
 // cannot go on the cmd that grounds). Three proofs stand between the scan and any write, all engine facts:
-//   DISP    the face is a displacement (trace.dispFlags): a brush face is one plane and cannot hand a hull a standable facet
+//   FACE    a displacement first (trace.dispFlags: facets, crests, quadrant catches). CSS 11-09: else the nearest BRUSH
+//           face (botox csgo wall_climb catches brush lips too, its hug alone is disp-only; the TF2 disp-only gate left
+//           wc dead on every dust2 wall, log disp=0 bn=-1,0,0). A brush win = flush ledge / lip / wall top above the
+//           last ground only (LandOk face_disp false), and the sweep runs only while that is reachable (BrushReach)
 //   NEAR    the hull face is within k_engage_support of it (one tick of fwd=450 closes ~0.45u, 16u out no variant reaches)
 //   GROUND  a held variant goes FL_ONGROUND sooner than the player's own keys would, <= k_land_support from THAT face, or
 //           <= k_engage_support on a disp ground higher than the last ground (crest / quadrant catch; LandOk)
@@ -55,10 +58,11 @@ static struct WcSteer {
     Vec3  t{}, at{};              /* along-wall unit; base roll's START at tick k_steer_delay */
     GameTrace_t face{};
     Vec3  view{}; float fwd = 0.f, side = 0.f; int buttons = 0;   /* your keys at the job's START */
+    bool  disp = true;            /* the job's face kind: LandOk's brush rule */
 } s_wcSteer;
 
 /* per-second counters, debug log */
-static int s_wcN[25]{}; /* ticks scan disp near sweep win hop strip wall rej d1 d2 d3 d4 plan zmiss dup cut | steer: job pick tick drift done | pin: try land */
+static int s_wcN[29]{}; /* ticks scan disp near sweep win hop strip wall rej d1 d2 d3 d4 plan zmiss dup cut | steer: job pick tick drift done | pin: try land | brush: face low win | pre */
 static int s_wcDep[wc::k_depth]{};   /* wins per depth */
 static Vec3 s_wcBrushN{};  /* last brush face the disp gate skipped (log bn=) */
 static int s_wcSims = 0; static long long s_wcUs = 0ll, s_wcUsWorst = 0ll;
@@ -113,11 +117,11 @@ static void WallClimb(void* pLocal, UserCmd_t* pCmd)
     if (const unsigned long long now = GetTickCount64(); g_debugLogEnable && now >= s_wcLogNext) {
         s_wcLogNext = now + 1000ull;
         if (s_wcN[0])
-            DebugLog("WC: ticks=%d scan=%d wall=%d disp=%d near=%d sweep=%d win=%d hop=%d strip=%d rej=%d dep=%d/%d/%d/%d/%d/%d plan=%d zmiss=%d dup=%d cut=%d steer=%d/%d/%d/%d/%d pin=%d/%d sims=%d us=%lld worst=%lld bn=%.2f,%.2f,%.2f",
+            DebugLog("WC: ticks=%d scan=%d wall=%d disp=%d near=%d sweep=%d win=%d hop=%d strip=%d rej=%d dep=%d/%d/%d/%d/%d/%d plan=%d zmiss=%d pre=%d dup=%d cut=%d steer=%d/%d/%d/%d/%d pin=%d/%d brush=%d/%d low=%d sims=%d us=%lld worst=%lld bn=%.2f,%.2f,%.2f",
                      s_wcN[0], s_wcN[1], s_wcN[8], s_wcN[2], s_wcN[3], s_wcN[4], s_wcN[5], s_wcN[6], s_wcN[7], s_wcN[9],
-                     s_wcDep[0], s_wcDep[1], s_wcDep[2], s_wcDep[3], s_wcDep[4], s_wcDep[5], s_wcN[14], s_wcN[15], s_wcN[16], s_wcN[17],
-                     s_wcN[18], s_wcN[22], s_wcN[19], s_wcN[20], s_wcN[21], s_wcN[23], s_wcN[24], s_wcSims, s_wcUs, s_wcUsWorst,
-                     s_wcBrushN.x, s_wcBrushN.y, s_wcBrushN.z);
+                     s_wcDep[0], s_wcDep[1], s_wcDep[2], s_wcDep[3], s_wcDep[4], s_wcDep[5], s_wcN[14], s_wcN[15], s_wcN[28], s_wcN[16], s_wcN[17],
+                     s_wcN[18], s_wcN[22], s_wcN[19], s_wcN[20], s_wcN[21], s_wcN[23], s_wcN[24], s_wcN[25], s_wcN[27], s_wcN[26],
+                     s_wcSims, s_wcUs, s_wcUsWorst, s_wcBrushN.x, s_wcBrushN.y, s_wcBrushN.z);
         for (int& c : s_wcN) c = 0;
         for (int& c : s_wcDep) c = 0;
         s_wcSims = 0; s_wcUs = s_wcUsWorst = 0ll;
@@ -152,6 +156,9 @@ static void WallClimb(void* pLocal, UserCmd_t* pCmd)
     const bool hop_ground = s_wcHop.Clock(bGroundPre);
     const bool armed_hop  = hop_ground && s_wcHop.ZOk(s_prePredOrigin.z);
     if (hop_ground && !armed_hop) ++s_wcN[15];
+    // the win's ground tick arrived with a pressable jump already in the cmd: LJ / edge jump / pixel hop run first and
+    // hop it (11-09 log: 24 of 31 chains = "LJ: takeoff edge", hop=0) -- log pre=, the climb went on all the same
+    if (armed_hop && (pCmd->buttons & IN_JUMP) && !s_prevCmdJump) ++s_wcN[28];
 
     // UNLATCH. FinishMove copies this cmd's buttons into m_nOldButtons and a grounded jump is refused while IN_JUMP is set
     // there -- only a jumpless cmd clears it. Held space would block the very seam jump the climb exists to make
@@ -162,13 +169,25 @@ static void WallClimb(void* pLocal, UserCmd_t* pCmd)
         ++s_wcN[7];
     }
 
+    // PLAN LOST: last tick's win had ticks to go, and this cmd neither sent a wc land nor grounds. at= the gate that
+    // returned (11-09 log: 7 of 31 chains died mid-plan with nothing logged)
+    const int   plan_in  = bGroundPre ? 0 : s_wcPlan.left;
+    const char* plan_why = "miss";
+    struct PlanLost {
+        const int& in; const char* const& why; const bool& post;
+        ~PlanLost() { if (in > 0 && !s_wcLanded && !post) DebugLog("WC PLAN LOST: left=%d at=%s", in, why); }
+    } plan_lost{ plan_in, plan_why, bGroundPost };
+
     // yields. TB / HS / HB catches, AS pins (AS outranks WC, coldtires order), a running tb ride, EB's cmd, every PS owner:
     // the assist arc flies beside the very wall this sweeps and a win would overwrite its catch duck / steer. Pixel hop
     // ran first this cmd (ref order). A bare pin (s_psRidingNow) is NOT a yield in CSS: see the pin search below
     if (s_textureBugHit || s_headSurfHit || s_headBounceHit || s_airStuckHit || s_asHolding || s_ebDetected
         || (On(g_textureBug, g_textureBugKey, g_textureBugMode) && s_tbRideHold > 0)
-        || s_psAssistHopActive || s_shouldPixelSurf || s_psAssistDuckHeld || s_pixelHopHit)
+        || s_psAssistHopActive || s_shouldPixelSurf || s_psAssistDuckHeld || s_pixelHopHit) {
+        plan_why = s_textureBugHit ? "tb" : s_headSurfHit ? "hs" : s_headBounceHit ? "hb" : s_airStuckHit || s_asHolding ? "as"
+                 : s_ebDetected ? "eb" : s_pixelHopHit ? "ph" : (s_psAssistHopActive || s_shouldPixelSurf || s_psAssistDuckHeld) ? "ps" : "tbride";
         return;
+    }
 
     // ---- THE LAUNCH ---- wc never jumps on its own: s_rawJumpHeld is the real space bar before AutoJump rewrites the cmd
     if (bGroundPre) {
@@ -197,6 +216,7 @@ static void WallClimb(void* pLocal, UserCmd_t* pCmd)
     if (!g_wallClimbSeamSteer) s_wcSteer.valid = false;
     const bool steer_first = g_wallClimbSeamSteer && rising && cmdNum - s_wcGroundCmd == 1;
     const bool steer_slice = s_wcSteer.valid && !s_wcSteer.done && cmdNum < s_wcSteer.startCmd + k_steer_delay;
+    plan_why = "rising";
     if (rising && !steer_first && !steer_slice) return;
 
     // the keys the sweep starts from: TB's creep / probe (no catch) is a band setup on a shared key -- it fired every air wall
@@ -209,34 +229,44 @@ static void WallClimb(void* pLocal, UserCmd_t* pCmd)
         base.buttons     = s_wcPreTbButtons;
     }
     // A CLIMB IS SOMETHING THE PLAYER DOES. No keys = no write, and no 120-230 trace scan either
+    plan_why = "keys";
     if (fabsf(base.forwardmove) < k_min_input && fabsf(base.sidemove) < k_min_input) return;
+    plan_why = "rising";
 
     const Vec3 start_pos = EntV3(pLocal, g_offOrigin);
     const Vec3 mins = EntV3(pLocal, g_offMins), maxs = EntV3(pLocal, g_offMaxs);
 
     GameTrace_t primary{};
     float found_angle = 0.f;
-    // GATE 1: displacement or nothing. The scan hands back the FIRST face in angle order, so a brush face there (the
-    // trim under a disp cliff, the far side of a corner) used to end the tick with a disp face sitting in the next
-    // direction: 11-04 log read disp=0 on every second. Step past brush faces, one full turn at most
-    // (wallclimb_pure.h NextScan). s_wcWallTick is not stamped on a brush, so the unlatch stays out of it too
+    bool  face_disp   = false;
+    // GATE 1: displacement first. The scan hands back the FIRST face in angle order, so a brush face there (the trim
+    // under a disp cliff, the far side of a corner) used to end the tick with a disp face sitting in the next direction:
+    // 11-04 log read disp=0 on every second. Step past brush faces, one full turn at most (wallclimb_pure.h NextScan).
+    // No disp anywhere = the first brush face (CSS 11-09, header FACE). Scan cursor stays on disps only, as before
     const auto scan_disp = [&]() {
         ++s_wcN[1];
-        bool any_wall = false, have_disp = false;
+        bool any_wall = false;
+        GameTrace_t brush{};
+        face_disp = false;
         for (float a = s_wcScanStart; ScanLeft(s_wcScanStart, a); a = NextScan(found_angle)) {
             if (!MV_DetectWallLines(pLocal, start_pos, mins, maxs, a, primary, found_angle, k_scan_nz, k_scan_reach))
                 break;
+            if (primary.dispFlags & DISPSURF_SURFACE) { face_disp = true; break; }
+            if (!any_wall) brush = primary;
             any_wall = true;
-            if (primary.dispFlags & DISPSURF_SURFACE) { have_disp = true; break; }
             s_wcBrushN = primary.plane.normal;
         }
-        if (any_wall) ++s_wcN[8];
-        if (!have_disp) {
-            s_wcScanStart = 0.f;   // next scan fresh, do not pin on a brush
-            return false;
+        if (face_disp) {
+            ++s_wcN[8];
+            ++s_wcN[2];
+            s_wcScanStart = WrapScan(found_angle);
+            return true;
         }
-        ++s_wcN[2];
-        s_wcScanStart = WrapScan(found_angle);
+        s_wcScanStart = 0.f;   // next scan fresh, do not pin on a brush
+        if (!any_wall) return false;
+        ++s_wcN[8];
+        ++s_wcN[25];
+        primary = brush;
         return true;
     };
 
@@ -304,7 +334,7 @@ static void WallClimb(void* pLocal, UserCmd_t* pCmd)
         return MV_SupportDistance(pLocal, f, &o);
     };
     // the entity just grounded: a catch = on THAT face (gate 3 without the disp traces: flush, or a crest above the last ground)
-    const auto roll_caught = [&](const Vec3& o) { return LandOk(face_support(o), true, o.z, s_wcGroundZ, false); };
+    const auto roll_caught = [&](const Vec3& o) { return LandOk(face_support(o), true, o.z, s_wcGroundZ, false, J.disp); };
     const auto steer_job = [&]() {
         const auto finish = [&](const float score) {
             J.rolling = false;
@@ -375,6 +405,7 @@ static void WallClimb(void* pLocal, UserCmd_t* pCmd)
             J.valid    = true;
             J.startCmd = cmdNum;
             J.face     = primary;
+            J.disp     = face_disp;
             J.faceZ    = start_pos.z;
             J.t        = Vec3(primary.plane.normal.y, -primary.plane.normal.x, 0.f);
             const float tl = J.t.Length2D();
@@ -433,13 +464,23 @@ static void WallClimb(void* pLocal, UserCmd_t* pCmd)
         }
     }
 
+    plan_why = "scan";
     if (!scan_disp()) return;
+    // brush: a win must land above the last ground + 2. Falling past that = no win exists, no sims (dust2 = every wall)
+    plan_why = "low";
+    if (!face_disp && !BrushReach(start_pos.z, velocity.z, s_wcGroundZ, CvarFloat("sv_gravity", 800.f))) { ++s_wcN[26]; return; }
     // GATE 2: near it, live, before any sim
     const float live_support = MV_SupportDistance(pLocal, primary, &start_pos);
+    plan_why = "far";
     if (live_support > k_engage_support) return;
+    plan_why = "away";
     ++s_wcN[3];
-    s_wcWallTick      = iTickNow;
-    s_wallClimbActive = true;   // an air wall tick: pixel surf yields
+    // disp only: pixel surf lives on brush walls, so a brush tick claims nothing until a win (s_wallClimbHit, and
+    // PS yields to that). The unlatch window too: a held space bar near a brush wall stays the player's
+    if (face_disp) {
+        s_wcWallTick      = iTickNow;
+        s_wallClimbActive = true;   // an air wall tick: pixel surf yields
+    }
 
     // seamless leave: steering off the wall = the player keeps the cmd (and drops the steer, botox you_leave)
     if (TB_SteeringAwayFromWall(&base, primary.plane.normal, base.forwardmove, base.sidemove)) {
@@ -495,7 +536,7 @@ static void WallClimb(void* pLocal, UserCmd_t* pCmd)
         if (!grounded()) return support <= k_keep_support ? 0 : 1;
         // GATE 3: grounded ON THAT FACE. On a disp map FL_ONGROUND is very often the floor you were landing on anyway
         bool ground_disp = false, center_floor = false;
-        if (support > k_land_support && support <= k_engage_support) {
+        if (face_disp && support > k_land_support && support <= k_engage_support) {   // brush: flush or nothing
             TraceFilterWorldProps filter; filter.Setup(pLocal);
             GameTrace_t tr{};
             TraceHull(org, org - Vec3(0, 0, 2.f), EntV3(pLocal, g_offMins), EntV3(pLocal, g_offMaxs), MASK_PLAYERSOLID, &filter, &tr);
@@ -506,7 +547,7 @@ static void WallClimb(void* pLocal, UserCmd_t* pCmd)
                 center_floor = cl.fraction < 1.f && cl.plane.normal.z >= 0.7f;
             }
         }
-        if (!LandOk(support, ground_disp, org.z, s_wcGroundZ, center_floor)
+        if (!LandOk(support, ground_disp, org.z, s_wcGroundZ, center_floor, face_disp)
             || (Slowed(start_xy, EntV3(pLocal, g_offVelocity).Length2D()) && g_wcPreventSlow)) {
             ++s_wcN[9];
             return 1;
@@ -539,10 +580,13 @@ static void WallClimb(void* pLocal, UserCmd_t* pCmd)
     // THE BASELINE decides whether the rest may run: the player's own move (TB's, if it is creeping), held up to k_depth
     // ticks. Grounding next tick = nothing to buy. Grounding at tick gb = a variant must beat it (land sooner), or a hop
     // armed off it would fire on whatever they happened to land on
+    plan_why = "cut";
     if (!found) {
         if (!can_sim()) return;
+        plan_why = "own";   // your keys ground next tick
         sim(*pCmd);
         if (grounded()) return;
+        plan_why = "miss";
         UserCmd_t c = *pCmd;
         for (int d = 2; d <= k_depth && can_sim(); ++d) {
             Pred_Simulate(pLocal, &c); ++sims;
@@ -636,11 +680,12 @@ static void WallClimb(void* pLocal, UserCmd_t* pCmd)
         AT_Stamp(*pCmd, "wc");      // last writer: AS_FinalStamp re-applies it after the aimbot
         s_wallClimbHit = s_wcLanded = true;
         ++s_wcN[5];
-        DebugLog("WC LAND: d=%d gb=%d fwd=%.0f side=%.0f duck=%d yo=%.0f dev=%.0f live=%.2f land=%.2f n=%.3f,%.3f,%.3f xy=%.0f vz=%.1f sims=%d%s%s",
+        if (!face_disp) ++s_wcN[27];
+        DebugLog("WC LAND: d=%d gb=%d fwd=%.0f side=%.0f duck=%d yo=%.0f dev=%.0f live=%.2f land=%.2f up=%.2f n=%.3f,%.3f,%.3f xy=%.0f vz=%.1f sims=%d%s%s%s",
                  found_depth, gb, best.forwardmove, best.sidemove, (best.buttons & IN_DUCK) != 0,
-                 best_yo, fabsf(WrapDeg(best_wish.y - own_yaw)), live_support, land_support,
+                 best_yo, fabsf(WrapDeg(best_wish.y - own_yaw)), live_support, land_support, land_z - s_wcGroundZ,
                  primary.plane.normal.x, primary.plane.normal.y, primary.plane.normal.z, start_xy, velocity.z, sims,
-                 tb_creep ? " tbdrop" : "", from_plan ? " plan" : "");
+                 tb_creep ? " tbdrop" : "", from_plan ? " plan" : "", face_disp ? "" : " brush");
     }
 
     // visualize: the face, then where the outgoing cmd takes you (green end = a land). Extra sims, off the clock

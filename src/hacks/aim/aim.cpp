@@ -7,6 +7,7 @@
 #include "aimbot.h"
 #include "menu.h"
 #include "hud_aim.h"   // unit hud: HudAim_Restore on unload
+#include "../visuals/esp_preview.h"   // EspPreview::OnEject
 
 #include "../../dependencies/imgui/imgui.h"
 
@@ -92,6 +93,10 @@ static const std::vector<std::string> s_vHookWhitelist =
 	// the aimbot's own on-screen overlays (tick indicator, crit / no-spread readout)
 	"IEngineVGui_Paint",
 
+	// esp preview fake entity out of a map (esp_preview.cpp): our model_t*, neutral light state
+	"CModelInfoClient_GetModel",
+	"R_LightcacheGetDynamic",
+
 	// silences the datatable spam the netvar walk provokes
 	"DataTable_Warning",
 
@@ -142,6 +147,7 @@ void Aim_Unload()
 		return;
 
 	G::Unload = true;
+	EspPreview::OnEject();
 	HudAim_Restore();   // unit hud: net_graphtext back to the player's value
 	U::Hooks.Unload();
 	F::Backtrack.Release();   // after the hooks: no FSN / CreateMove writes into the rings

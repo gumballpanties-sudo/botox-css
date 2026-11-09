@@ -55,10 +55,25 @@ namespace wc
     // off one facet's plane on a bumpy disp) it still is when the ground under the hull is a disp, higher than the last
     // ground (a landing on the floor you jumped from is never higher) and NOT walkable under the hull's center (a crest /
     // quadrant catch hangs the center over the steep slope; an uphill disp floor has a standable facet right below it)
-    inline bool LandOk(const float support, const bool ground_disp, const float land_z, const float ground_z, const bool center_floor)
+    // face_disp false = CSS brush face (botox csgo wall_climb catches brush lips too, only its hug is disp-only):
+    // a brush face is one plane, so the only catch is a ledge / lip / wall top flush beside it, and only ABOVE the last
+    // ground -- flush on the floor beside a brush wall is a plain landing, never a climb
+    inline bool LandOk(const float support, const bool ground_disp, const float land_z, const float ground_z, const bool center_floor,
+                       const bool face_disp = true)
     {
+        if (!face_disp) return support <= k_land_support && land_z > ground_z + k_climb_rise;
         if (support <= k_land_support) return true;
         return support <= k_engage_support && ground_disp && !center_floor && land_z > ground_z + k_climb_rise;
+    }
+
+    // brush gate, before any sim: a brush win must land above ground_z + k_climb_rise. Origin z can still gain the
+    // rise left in vz (v^2 / 2g, vz <= 140 here) plus one air duck (CSS FinishDuck lift 8.5, cs_gamemovement.cpp:826;
+    // 9 = margin). Under that = no brush win exists, skip ~100 sims. Every falling tick beside a dust2 wall hits this
+    constexpr float k_air_duck_lift = 9.f;
+    inline bool BrushReach(const float start_z, const float vz, const float ground_z, const float gravity = 800.f)
+    {
+        const float up = vz > 0.f ? vz * vz / (2.f * gravity) : 0.f;
+        return start_z + up + k_air_duck_lift > ground_z + k_climb_rise;
     }
 
     // disp-face scan past brush faces. MV_DetectWallLines walks 16 directions from its start and returns the first

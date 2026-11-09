@@ -31,6 +31,7 @@
 #include "../hacks/hud/points.h"
 #include "../hacks/hud/spectator_list.h"
 #include "../hacks/esp/esp_queue.h"  // botox m_draw_data: esp recorded on the game thread, replayed in RenderEspQueue
+#include "../hacks/visuals/esp_preview.h"   // EspPreview::DropTexture in h_Reset
 #include "../hacks/aim/esp_weapon_icons.h"   // ESPC_WPNICON resolve (plain globals.h types, aim TU safe)
 #include "../hacks/visuals/player_stencil.h"  // PlayerStencil_ReleaseTargets in h_Reset
 #include "../hacks/menu/fonts.h"          // fonts tab: indicator face picked at runtime
@@ -327,7 +328,10 @@ static void RenderPsOverlay()
         if (!g_psFinderPixeljump)  pj.clear();
         if (!g_psFinderJumpSurf)   js.clear();
         if (bFinder && g_psFinderTb) tb = d.tbPts;
-        if (g_psMapLines) tb.insert(tb.end(), d.mapTbPts.begin(), d.mapTbPts.end());
+        if (g_psMapLines)
+            for (const Vec3& p : d.mapTbPts)   // max visible distance: skybox seams stay hidden
+                if (g_psMapMaxDist <= 0.f || d.localOrigin.DistTo(p) <= g_psMapMaxDist)
+                    tb.push_back(p);
 
         const std::vector<Vec3>* live[kPfTypes] = { &hb, &pj, (bFinder && g_psFinderPixelsurf) ? &d.finderPts : &none, &tb, &js };
         for (int t = 0; t < kPfTypes; t++) PfFade(s_fndAnim[t], *live[t], dt);
@@ -420,7 +424,7 @@ static void RenderPsOverlay()
     // (kFine); the middle stays on the old 64u grid, so a long seam costs ~len/64 + 8 lines.
     // the finder's surf lengths (g_psFinderLength) are the same kind of mark, drawn the same way
     // in the finder's surf colour
-    auto DrawSegs = [&](const std::vector<Vec3>& segs, int r, int g, int b8)
+    auto DrawSegs = [&](const std::vector<Vec3>& segs, int r, int g, int b8, float maxDist = 0.f)
     {
         constexpr float kPiece = 64.f;   // middle of the line
         constexpr float kFine  = 6.f;    // inside a fade zone: one alpha step per piece
@@ -434,6 +438,13 @@ static void RenderPsOverlay()
             const Vec3 dir = b - a;
             const float len = dir.Length();
             if (len < 0.01f) continue;
+            // max visible distance: nearest point of the segment to you, so a long seam you
+            // stand at the end of still draws (skybox seams are thousands of units out)
+            if (maxDist > 0.f)
+            {
+                const float t = Clamp01((d.localOrigin - a).Dot(dir) / (len * len));
+                if (d.localOrigin.DistTo(a + dir * t) > maxDist) continue;
+            }
             // a short run cannot spend 48u per side -- it gets a third of itself instead, so a
             // 32u stub still reads as a fading mark and not as a solid dash
             const float fade = std::min(kFadeU, len * 0.34f);
@@ -453,7 +464,7 @@ static void RenderPsOverlay()
         }
     };
     if (g_psMapLines && d.mapLines.size() >= 2)
-        DrawSegs(d.mapLines, 255, 255, 255);
+        DrawSegs(d.mapLines, 255, 255, 255, g_psMapMaxDist);
     if (bFinder && g_psFinderLength && d.finderLines.size() >= 2)
         DrawSegs(d.finderLines, kPfRgb[2][0], kPfRgb[2][1], kPfRgb[2][2]);
 
@@ -568,10 +579,8 @@ static void RenderPsOverlay()
     }
 }
 
-// ---- pixelsurf lines, botox movement.cpp:728-914, 1:1: the REAL recorded wall-walk segments
-// (PsTrajectoryRecord, pixelsurf.inl) + "full trajectory" = botox's live re-scan while riding
-// (PsTrajectoryLive, scanned on the cmd thread). botox draws both in one colour; live runs use
-// the full-trajectory colour row here so that row does something. Own function: inside
+// ---- pixelsurf lines: ridden surfs walked with the pixel finder's hold proof (pixelsurf.inl
+// PIXELSURF LINES), drawn in botox's line styles (movement.cpp:873-913). Own function: inside
 // RenderPsOverlay it sat behind the finder/assist early returns, so lines drew only with PS
 // assist + its render on
 static void RenderPsLines()
@@ -595,8 +604,8 @@ static void RenderPsLines()
     };
 
     {
-        static std::vector<std::vector<Vec3>> trajSegs, trajLive;
-        PS_GetTrajectory(trajSegs, trajLive);
+        static std::vector<std::vector<Vec3>> trajSegs;
+        PS_GetTrajectory(trajSegs);
         // botox m_pixel_surf_line_style (movement.cpp :873-913, 1:1): 0 full solid polyline,
         // 1 dotted (dash = thickness*3, min 4, on/off phase walked along the segment),
         // 2 dots only (a filled circle per point, radius thickness clamped >= 1.5, no line).
@@ -615,6 +624,7 @@ static void RenderPsLines()
                 return;
             }
             ImVec2 prev; bool havePrev = false;
+            float phase = 0.f;   // botox: carried along the whole run, not reset per piece
             for (const Vec3& p : pts)
             {
                 ImVec2 s;
@@ -631,7 +641,6 @@ static void RenderPsLines()
                         if (len >= 0.01f && len <= 16384.f)
                         {
                             const float ux = dx / len, uy = dy / len;
-                            float phase = 0.f;
                             for (float t = 0.f; t < len; )
                             {
                                 const bool on = phase < dash;
@@ -651,8 +660,6 @@ static void RenderPsLines()
         };
         for (const std::vector<Vec3>& seg : trajSegs)
             connect(seg, g_psLinesColor);
-        for (const std::vector<Vec3>& run : trajLive)
-            connect(run, g_psLinesFullColor);
     }
 }
 
@@ -1423,6 +1430,7 @@ static void SplitDrawData()
     ImGuiWindow* menuRoot = ImGui::FindWindowByName("botox");
     ImGuiWindow* psRoot   = ImGui::FindWindowByName("ps point");
     ImGuiWindow* msRoot   = ImGui::FindWindowByName(Minesweeper_WindowName());   // own window, fades with the menu
+    ImGuiWindow* espRoot  = ImGui::FindWindowByName("botox-esp-preview");      // esp preview window, same
 
     for (int i = 0; i < dd->CmdListsCount; ++i)
     {
@@ -1442,7 +1450,7 @@ static void SplitDrawData()
             ImGuiWindow* w = g.Windows[wi];
             if (w->DrawList != dl) continue;
             for (ImGuiWindow* p = w; p; p = p->ParentWindowInBeginStack)
-                if (p == menuRoot || p == psRoot || p == msRoot) { menu = true; fade = (p != psRoot); break; }
+                if (p == menuRoot || p == psRoot || p == msRoot || p == espRoot) { menu = true; fade = (p != psRoot); break; }
             break;
         }
 
@@ -1816,29 +1824,13 @@ static void RecolourVertsY(ImDrawList* dl, int first, uint32_t topCol, uint32_t 
     }
 }
 
-static void RenderEspQueue()
+// replay half of RenderEspQueue, pulled out so esp preview's DrawBody (hacks/visuals/esp_preview.cpp)
+// can draw its own EspFrame through the same command interpreter. Font / text-look / avatar + weapon
+// icon lookup stay the render.cpp statics they always were: a preview frame is built and replayed on
+// this same render thread, same ImGui frame, so nothing here needs to change for that caller.
+void EspQ_ReplayFrame(ImDrawList* dl, const EspFrame& f)
 {
-    ImDrawList* dl = ImGui::GetBackgroundDrawList();
     ImFont* font = s_fontEsp ? s_fontEsp : ImGui::GetFont();
-    // copied out under the lock, replayed outside it: Avatar_Get can create a texture, and the game
-    // thread's Commit must never spin behind that. s_rtEspSeq = the frame this build is for (multicore)
-    static EspFrame f;
-    EspQ::CopyFrame(s_rtEspSeq, f);
-    if (f.cmds.empty() || GetTickCount64() - f.stampMs > 250)
-        return;
-    // esp.cpp projects in ENGINE screen pixels (H::Draw size); ImGui draws in its DisplaySize (window
-    // client rect). Windowed + DPI scaling makes them differ, and unscaled every box and name lands
-    // off by that ratio. Everything this replay adds is rescaled at the end.
-    const ImGuiIO& io = ImGui::GetIO();
-    const float sx = f.srcW > 0.f ? io.DisplaySize.x / f.srcW : 1.f, sy = f.srcH > 0.f ? io.DisplaySize.y / f.srcH : 1.f;
-    static bool s_loggedSize = false;
-    if (!s_loggedSize)
-    {
-        s_loggedSize = true;
-        DebugLog("esp: engine screen %.0fx%.0f, imgui display %.0fx%.0f -> replay scale %.3f x %.3f",
-            f.srcW, f.srcH, io.DisplaySize.x, io.DisplaySize.y, sx, sy);
-    }
-    const int firstVtx = dl->VtxBuffer.Size;
     const auto pt = [&](int i) { return ImVec2(f.pts[i * 2], f.pts[i * 2 + 1]); };
     float lastTextLeft = 0.f;
     ImVec2 buf[64];
@@ -1949,6 +1941,31 @@ static void RenderEspQueue()
         }
         }
     }
+}
+
+static void RenderEspQueue()
+{
+    ImDrawList* dl = ImGui::GetBackgroundDrawList();
+    // copied out under the lock, replayed outside it: Avatar_Get can create a texture, and the game
+    // thread's Commit must never spin behind that. s_rtEspSeq = the frame this build is for (multicore)
+    static EspFrame f;
+    EspQ::CopyFrame(s_rtEspSeq, f);
+    if (f.cmds.empty() || GetTickCount64() - f.stampMs > 250)
+        return;
+    // esp.cpp projects in ENGINE screen pixels (H::Draw size); ImGui draws in its DisplaySize (window
+    // client rect). Windowed + DPI scaling makes them differ, and unscaled every box and name lands
+    // off by that ratio. Everything this replay adds is rescaled at the end.
+    const ImGuiIO& io = ImGui::GetIO();
+    const float sx = f.srcW > 0.f ? io.DisplaySize.x / f.srcW : 1.f, sy = f.srcH > 0.f ? io.DisplaySize.y / f.srcH : 1.f;
+    static bool s_loggedSize = false;
+    if (!s_loggedSize)
+    {
+        s_loggedSize = true;
+        DebugLog("esp: engine screen %.0fx%.0f, imgui display %.0fx%.0f -> replay scale %.3f x %.3f",
+            f.srcW, f.srcH, io.DisplaySize.x, io.DisplaySize.y, sx, sy);
+    }
+    const int firstVtx = dl->VtxBuffer.Size;
+    EspQ_ReplayFrame(dl, f);
     if (fabsf(sx - 1.f) > 1e-3f || fabsf(sy - 1.f) > 1e-3f)
         for (int i = firstVtx; i < dl->VtxBuffer.Size; ++i)
             dl->VtxBuffer[i].pos.x *= sx, dl->VtxBuffer[i].pos.y *= sy;
@@ -2527,6 +2544,7 @@ HRESULT __stdcall h_Reset(IDirect3DDevice9* dev, D3DPRESENT_PARAMETERS* pp) {
     Indicators_ReleaseTextures();         // mitosis morph texture; rebuilt on the next split
     Avatar_ReleaseAll();               // unit E5: avatar textures are DEFAULT-pool too
     PlayerStencil_ReleaseTargets();    // esp unit: player stencil mask/blur targets, DEFAULT-pool
+    EspPreview::DropTexture();         // esp preview: its target is remade, the d3d texture with it
     GifTex_ReleaseAll();               // unit E5: gif frame texture, GDI+ bitmap survives the reset
     SpectatorList_ReleaseTextures();   // spec unit: eyes style row textures, DEFAULT-pool
     BlurRect_Destroy();                // unit E5: blur scratch targets + shader

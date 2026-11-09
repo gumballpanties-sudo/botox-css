@@ -10,7 +10,6 @@
 { "autoStrafeType",        CfgEntry::INT,   &g_autoStrafeType, 0 },
 { "autoStrafeLastKeys",    CfgEntry::BOOL,  &g_autoStrafeLastKeys, 0 },
 { "autoStrafeLastMouse",   CfgEntry::BOOL,  &g_autoStrafeLastMouse, 0 },
-{ "tickFix128",            CfgEntry::BOOL,  &g_tickFix128, 0 },
 { "practiceWindow",        CfgEntry::BOOL,  &g_practiceWindow, 0 },
 { "practiceWindowShow",    CfgEntry::BOOL,  &g_practiceWindowShow, 0 },
 { "fakePov",               CfgEntry::BOOL,  &g_fakePov, 0 },

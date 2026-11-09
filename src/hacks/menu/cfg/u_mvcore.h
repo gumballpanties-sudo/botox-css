@@ -29,9 +29,6 @@ inline int  g_autoStrafeType = 0;         // 0 standard, 1 WASD, 2 circle (mouse
 inline bool g_autoStrafeLastKeys = false; // type==1: strafe in last pressed direction
 inline bool g_autoStrafeLastMouse = false;// type==2: strafe in last mouse direction
 
-// ---- "other" group: botox rows with no CSS var yet ----
-inline bool g_tickFix128 = false;           // m_tick_fix_128, def false
-
 // practice window (botox variables.h:1878-1881) -- REPLACES the old TF2-port practice.inl
 // console-cheat rows (infinite ammo/health/map time/noclip). The checkpoint/teleport binds
 // themselves already existed as g_prSaveKey/g_prTpKey (globals.h, practice.inl PrTeleport());

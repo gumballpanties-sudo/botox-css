@@ -337,9 +337,10 @@ struct PsDrawData
 };
 void PS_GetDrawData(PsDrawData& out);
 void PS_GetBox(PsDrawData& out);   // boxText/boxMs only -- no vector copies
-// botox m_trajectory_segments (movement.cpp:1020-1210), recorded by pixelsurf.inl's
-// PsTrajectoryRecord: current map's confirmed wall-walk segments, each >= 2 points (PSPORT round 3)
-void PS_GetTrajectory(std::vector<std::vector<Vec3>>& out, std::vector<std::vector<Vec3>>& live);
+// pixelsurf lines: current map's ridden surfs, walked with the finder's hold proof (pixelsurf.inl
+// PsTrajectoryRecord -> psassist.inl PsRideLineTick), each a polyline of <= 8u pieces
+void PS_GetTrajectory(std::vector<std::vector<Vec3>>& out);
+void PS_ClearTrajectory();   // every map's lines (menu "clear lines")
 // finder extra kinds: jump surfs (pins only a jump reaches), headbounce pins, pixeljump lips
 void PF_GetExtraPts(std::vector<Vec3>& jump, std::vector<Vec3>& headbounce, std::vector<Vec3>& lip);
 

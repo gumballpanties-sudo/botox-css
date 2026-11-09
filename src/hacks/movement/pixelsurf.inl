@@ -436,6 +436,11 @@ static void PsRideDetect()
     const bool wasRiding = s_psRidingNow;
     s_psRidingNow = bSurfVel && s_prevSurfVel;
     s_prevSurfVel = bSurfVel;
+    if (static bool s_linesWas = false; s_linesWas != g_psLinesEnable)
+    {
+        s_linesWas = g_psLinesEnable;
+        DebugLog("PSR: pixelsurf lines %s", g_psLinesEnable ? "on" : "off");
+    }
     if (s_psRidingNow && !wasRiding)   // the edge pixelsurf lines record on
         DebugLog("PSR: ride start z=%.3f vz=%.3f lines=%d", s_prePredOrigin.z, s_prePredVel.z, g_psLinesEnable ? 1 : 0);
     // where this pin began -- the indicator's surf / wedge split (ps_surf.h)
@@ -448,18 +453,14 @@ static void PsRideDetect()
 // no end-of-ride braking/parking stage. PsPark() and s_psParkHold deleted with it.
 
 // ============================================================================
-// PIXELSURF LINES -- live trajectory recording, botox movement.cpp:1020-1210, 1:1 (PSPORT
-// round 3 11-04). On the rising edge of a ride (s_psRidingNow, matches botox's "now_in_surf &&
-// !m_was_in_surf"): find the wall face under the feet (32-direction horizontal scan), walk it
-// both ways in 16u steps tracing INTO the wall each step (stop on a face whose normal diverges
-// from the first one, or a step too big to be the same wall), and at each step confirm the catch
-// still holds by actually simulating a jump+duck+10u-press-into-the-wall from a point
-// k_test_al off the traced face and checking vz lands near -halfgrav. Segments are deduped
-// against what is already recorded (ps_line_uncovered_runs) so riding the same seam twice
-// does not pile up overlapping lines.
-//
-// botox's is_solution_at also pokes `*(int*)(entity+0x25C) = 2`: CS:GO m_MoveType = MOVETYPE_WALK.
-// Here g_predWalkSims does the same for every probe sim (set after Pred_Start), so no poke.
+// PIXELSURF LINES -- 11-09 rebuilt on the pixel finder's SURF LENGTH pass (psassist.inl PfHoldsAt).
+// The botox recorder this replaced traced the wall and sim-checked guessed hull spots 16u apart,
+// so its lines followed geometry, not the catch. Now: on the rising edge of a ride the real pin
+// (START origin, START stance, the face the hull is flush on) becomes a finder PfHit, and
+// PsRideLineTick (psassist.inl, own clock, after the movers) walks it 8u a step each way while the
+// finder's two-tick hold proof still pins, the last step bisected to 1u. What it proves is the
+// line; it grows on screen while walking and stays per map. A ride on a stretch already drawn
+// (same face, same z) is not walked again.
 // same IVEngineClient::GetLevelName slot 51 psassist.inl's EngineLevelName() calls -- that
 // function is defined later in this TU (psassist.inl is #included after pixelsurf.inl in
 // movement.cpp), so reusing its name here would be a duplicate definition, not a reuse
@@ -474,327 +475,67 @@ static const char* PsTrajLevelName()
     return n ? n : "";
 }
 
-struct PsTrajSegment { std::vector<Vec3> points; char map[128]; };
+struct PsTrajSegment { Vec3 a, b; char map[128]; };
 static std::mutex s_psTrajLock;
 static std::vector<PsTrajSegment> s_psTrajSegments;
+static std::vector<Vec3> s_psTrajWalking;   // the run being walked right now, 0 or 2 pts
 static bool s_psTrajWasRiding = false;
 
-static void SetEntOrigin(void* e, const Vec3& v)
-{
-    *reinterpret_cast<Vec3*>(reinterpret_cast<uintptr_t>(e) + g_offOrigin) = v;
-}
-
+// p within 4u (xy) of a stored line at the same height (zTol)
 static bool PsTrajCovered(const Vec3& p, const char* map, const float zTol)
 {
     std::lock_guard<std::mutex> l(s_psTrajLock);
     for (const PsTrajSegment& seg : s_psTrajSegments)
     {
-        if (strncmp(seg.map, map, sizeof(seg.map) - 1) != 0)
+        if (strncmp(seg.map, map, sizeof(seg.map) - 1) != 0 || fabsf(seg.a.z - p.z) >= zTol)
             continue;
-        const std::vector<Vec3>& pts = seg.points;
-        for (size_t i = 0; i < pts.size(); i++)
-        {
-            const Vec3& a = pts[i];
-            const Vec3& b = pts[i + 1 < pts.size() ? i + 1 : i];
-            if (fabsf(a.z - p.z) >= zTol)
-                continue;
-            // point-to-segment distance, 2D (botox point_to_line_distance)
-            const float dx = b.x - a.x, dy = b.y - a.y;
-            const float len2 = dx * dx + dy * dy;
-            float t = len2 > 0.0001f ? ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2 : 0.f;
-            t = std::clamp(t, 0.f, 1.f);
-            const float cx = a.x + t * dx, cy = a.y + t * dy;
-            const float ddx = p.x - cx, ddy = p.y - cy;
-            if (sqrtf(ddx * ddx + ddy * ddy) < 4.f)
-                return true;
-        }
+        const float dx = seg.b.x - seg.a.x, dy = seg.b.y - seg.a.y;
+        const float len2 = dx * dx + dy * dy;
+        const float t = len2 > 0.0001f ? std::clamp(((p.x - seg.a.x) * dx + (p.y - seg.a.y) * dy) / len2, 0.f, 1.f) : 0.f;
+        const float ddx = p.x - (seg.a.x + t * dx), ddy = p.y - (seg.a.y + t * dy);
+        if (ddx * ddx + ddy * ddy < 16.f)
+            return true;
     }
     return false;
 }
 
-static std::vector<std::vector<Vec3>> PsTrajUncoveredRuns(const std::vector<Vec3>& pts, const char* map, const float zTol)
-{
-    std::vector<std::vector<Vec3>> runs;
-    if (pts.empty())
-        return runs;
-    std::vector<char> covered(pts.size());
-    for (size_t i = 0; i < pts.size(); i++)
-        covered[i] = PsTrajCovered(pts[i], map, zTol) ? 1 : 0;
-
-    std::vector<Vec3> run;
-    for (size_t i = 1; i < pts.size(); i++)
-    {
-        if (covered[i - 1] && covered[i])
-        {
-            if (run.size() >= 2) runs.push_back(std::move(run));
-            run.clear();
-            continue;
-        }
-        if (run.empty()) run.push_back(pts[i - 1]);
-        run.push_back(pts[i]);
-    }
-    if (run.size() >= 2) runs.push_back(std::move(run));
-    return runs;
-}
+static void PsRideLineStart(void* pLocal, UserCmd_t* pCmd);   // psassist.inl
 
 static void PsTrajectoryRecord(void* pLocal, UserCmd_t* pCmd)
 {
-    if (!g_psLinesEnable || !pLocal || !pCmd)
-    {
-        s_psTrajWasRiding = false;
-        return;
-    }
-    const bool nowRiding = s_psRidingNow;
-    if (!(nowRiding && !s_psTrajWasRiding))
-    {
-        s_psTrajWasRiding = nowRiding;
-        return;
-    }
-    s_psTrajWasRiding = nowRiding;
-
-    const Vec3 midPos = EntV3(pLocal, g_offOrigin);
-    Vec3 velocity = EntV3(pLocal, g_offVelocity); velocity.z = 0.f;
-
-    bool surfaceFound = false;
-    Vec3 wallPos = midPos, wallNormal{}, tangent{};
-    constexpr int   k_angleSteps = 32;
-    constexpr float k_probeDist  = 128.f;
-    constexpr float k_normalZEps = 0.35f;
-    constexpr float k_facingThresh = -0.1f;
-    constexpr float k_twoPi = 6.28318530717958647692f;
-    float bestFraction = 1.f;
-    TraceFilterWorldProps fltScan; fltScan.Setup(pLocal);
-
-    for (int i = 0; i < k_angleSteps; ++i)
-    {
-        const float ang = (float)i / (float)k_angleSteps * k_twoPi;
-        const Vec3 dir(cosf(ang), sinf(ang), 0.f);
-        GameTrace_t t{};
-        TraceLine(midPos, midPos + dir * k_probeDist, MASK_PLAYERSOLID, &fltScan, &t);
-        if (t.fraction >= 1.f) continue;
-        if (fabsf(t.plane.normal.z) > k_normalZEps) continue;
-        if (t.plane.normal.x * dir.x + t.plane.normal.y * dir.y > k_facingThresh) continue;
-        if (t.fraction >= bestFraction) continue;
-        bestFraction = t.fraction;
-        wallPos = t.endpos; wallNormal = t.plane.normal; surfaceFound = true;
-    }
-
-    if (surfaceFound)
-    {
-        const float vDotN = velocity.x * wallNormal.x + velocity.y * wallNormal.y;
-        tangent = Vec3(velocity.x - wallNormal.x * vDotN, velocity.y - wallNormal.y * vDotN, 0.f);
-        if (tangent.Length() < 0.01f)
-            tangent = Vec3(-wallNormal.y, wallNormal.x, 0.f);
-        if (tangent.Length() > 0.01f)
-        {
-            tangent.Normalize();
-            if (velocity.Length2D() > 1.f && (tangent.x * velocity.x + tangent.y * velocity.y) < 0.f)
-                tangent = tangent * -1.f;
-        }
-        else
-            surfaceFound = false;
-    }
-
-    constexpr float k_testAl = 15.97803f;
-    constexpr float k_step = 16.f;
-    constexpr int   k_maxSteps = 128;
-    constexpr float k_probeDepth = 48.f;
-    const int predFrame = PredCommandsPredicted() - 1;
-    const float surfZ = midPos.z;
-
-    const Vec3 savedOrigin = EntV3(pLocal, g_offOrigin);
-    const int savedButtons = pCmd->buttons;
-    const float savedFwd = pCmd->forwardmove, savedSide = pCmd->sidemove;
-
-    const auto isSolutionAt = [&](const Vec3& candidate) -> bool
-    {
-        RestoreToFrame(predFrame);
-        pCmd->buttons |= IN_JUMP | IN_DUCK;
-        const Vec3 ang(-wallNormal.x, -wallNormal.y, 0.f);
-        const float rot = DEG2RADF(VectorAngles(ang).y - pCmd->viewangles.y);
-        pCmd->forwardmove = cosf(rot) * 10.f;
-        pCmd->sidemove = -sinf(rot) * 10.f;
-        SetEntOrigin(pLocal, candidate);
-        Pred_Simulate(pLocal, pCmd);
-        // botox: |vz - get_half_gravity_per_tick()| < 3, that fn returns -halfgrav. Wide on purpose:
-        // the candidate is a guessed hull spot, not a replay, so an exact pin test (was 0.05) failed
-        // every step and each side stopped after 1 point = 32u stub lines
-        return IsTargetVz(EntV3(pLocal, g_offVelocity).z, 3.f);
-    };
-
-    const auto scanAlongWall = [&](const Vec3& dir) -> std::vector<Vec3>
-    {
-        std::vector<Vec3> out;
-        Vec3 probeRef = wallPos, lastPt = wallPos;
-        for (int i = 0; i < k_maxSteps; ++i)
-        {
-            probeRef = probeRef + dir * k_step;
-            const Vec3 probeStart = probeRef + wallNormal * k_probeDepth;
-            const Vec3 probeEnd   = probeRef - wallNormal * k_probeDepth;
-            TraceFilterWorldProps f2; f2.Setup(pLocal);
-            GameTrace_t t{};
-            TraceLine(probeStart, probeEnd, MASK_PLAYERSOLID, &f2, &t);
-            if (t.fraction >= 1.f || t.startsolid) break;
-            if ((t.plane.normal.x * wallNormal.x + t.plane.normal.y * wallNormal.y + t.plane.normal.z * wallNormal.z) < 0.95f) break;
-
-            const Vec3 delta(t.endpos.x - lastPt.x, t.endpos.y - lastPt.y, 0.f);
-            if (delta.Length2D() > k_step * 1.5f) break;
-            const float normalJump = fabsf((t.endpos.x - lastPt.x) * wallNormal.x + (t.endpos.y - lastPt.y) * wallNormal.y + (t.endpos.z - lastPt.z) * wallNormal.z);
-            if (normalJump > 1.f) break;
-
-            auto signOrZero = [](float v) -> float { return v < -0.001f ? -1.f : v > 0.001f ? 1.f : 0.f; };
-            const Vec3 candidate(t.endpos.x + signOrZero(wallNormal.x) * k_testAl,
-                                  t.endpos.y + signOrZero(wallNormal.y) * k_testAl, surfZ);
-            const bool predictOk = isSolutionAt(candidate);
-            if (!predictOk && i > 0) break;
-
-            out.push_back(t.endpos);
-            lastPt = t.endpos;
-            probeRef = t.endpos + wallNormal * 0.5f;
-            if (!predictOk) break;
-        }
-        return out;
-    };
-
-    const char* entryMap = PsTrajLevelName();
-    if (PsTrajCovered(wallPos, entryMap, 2.f))
-        DebugLog("PSL: rec skip, already drawn here");
-    else
-    {
-        PsTrajSegment seg;
-        snprintf(seg.map, sizeof(seg.map), "%s", entryMap ? entryMap : "");
-
-        if (surfaceFound)
-        {
-            const std::vector<Vec3> fwd = scanAlongWall(tangent);
-            const std::vector<Vec3> bwd = scanAlongWall(tangent * -1.f);
-
-            RestoreToFrame(predFrame);
-            SetEntOrigin(pLocal, savedOrigin);
-            pCmd->buttons = savedButtons;
-            pCmd->forwardmove = savedFwd;
-            pCmd->sidemove = savedSide;
-
-            seg.points.reserve(bwd.size() + 1 + fwd.size());
-            for (auto it = bwd.rbegin(); it != bwd.rend(); ++it) seg.points.push_back(*it);
-            seg.points.push_back(wallPos);
-            for (const Vec3& p : fwd) seg.points.push_back(p);
-        }
-        else
-            seg.points.push_back(wallPos);
-
-        DebugLog("PSL: rec wall=%d pts=%d z=%.2f n=(%.2f %.2f)", surfaceFound ? 1 : 0, (int)seg.points.size(),
-                 midPos.z, wallNormal.x, wallNormal.y);
-        std::lock_guard<std::mutex> l(s_psTrajLock);
-        if (seg.points.size() < 2)
-            s_psTrajSegments.push_back(std::move(seg));
-        else
-            for (auto& run : PsTrajUncoveredRuns(seg.points, entryMap, 2.f))
-            {
-                PsTrajSegment r; r.points = std::move(run);
-                snprintf(r.map, sizeof(r.map), "%s", seg.map);
-                s_psTrajSegments.push_back(std::move(r));
-            }
-    }
+    const bool rising = s_psRidingNow && !s_psTrajWasRiding;
+    s_psTrajWasRiding = s_psRidingNow;
+    if (rising && g_psLinesEnable && pLocal && pCmd)
+        PsRideLineStart(pLocal, pCmd);
 }
 
-// "full trajectory" -- botox movement.cpp:774-871 live re-scan, 1:1 math. botox runs it in render
-// once per game tick; here it runs per cmd (same rate) so the traces stay on the game thread, and
-// the render thread only reads the published runs. Stamp = drop stale runs when this stops running
-// (blocked cmd, no prediction) instead of freezing the last scan on screen.
-static std::vector<std::vector<Vec3>> s_psTrajLive;
-static unsigned long long s_psTrajLiveMs = 0;
-
-static void PsTrajectoryLive(void* pLocal)
+// render-thread snapshot: current map's lines + the one being walked, each cut into <= 8u pieces
+// so a long line does not vanish when one end goes behind the camera (finder DrawSegs, same reason)
+void PS_GetTrajectory(std::vector<std::vector<Vec3>>& out)
 {
-    std::vector<std::vector<Vec3>> runs;
-    // botox is_pixelsurf_active = m_predicted_succesful (PS latch) || m_pin_detected (ride)
-    const bool on = g_psLinesEnable && g_psLinesFull && (s_shouldPixelSurf || s_psRidingNow)
-                 && pLocal && EntAlive(pLocal);
-    Vec3 horizDir = on ? EntV3(pLocal, g_offVelocity) : Vec3{};
-    horizDir.z = 0.f;
-    if (on && horizDir.Length2D() > 0.1f)
+    const auto cut = [](const Vec3& a, const Vec3& b)
     {
-        horizDir.Normalize();
-        Vec3 feetPos = EntV3(pLocal, g_offOrigin);
-        feetPos.z += 4.f;   // don't start in the floor
-
-        constexpr int   k_scanDirs   = 16;
-        constexpr float k_scanRadius = 32.f;
-        constexpr float k_twoPi      = 6.28318530717958647692f;
-        GameTrace_t initial{};
-        float closestDist = FLT_MAX;
-        bool foundWall = false;
-        for (int i = 0; i < k_scanDirs; ++i)
-        {
-            const float ang = (float)i * (k_twoPi / k_scanDirs);
-            const Vec3 dir(cosf(ang), sinf(ang), 0.f);
-            TraceFilterWorldProps flt; flt.Setup(pLocal);
-            GameTrace_t t{};
-            TraceLine(feetPos, feetPos + dir * k_scanRadius, MASK_PLAYERSOLID, &flt, &t);
-            if (t.fraction < 1.f && !t.startsolid)
-            {
-                const float d = t.fraction * k_scanRadius;
-                if (d < closestDist) { closestDist = d; initial = t; foundWall = true; }
-            }
-        }
-
-        if (foundWall)
-        {
-            const Vec3 wallNormal = initial.plane.normal;
-            const float hDotN = horizDir.x * wallNormal.x + horizDir.y * wallNormal.y + horizDir.z * wallNormal.z;
-            Vec3 tangent = horizDir - wallNormal * hDotN;
-            if (tangent.Length() < 0.01f)
-            {
-                tangent = Vec3(-wallNormal.y, wallNormal.x, 0.f);
-                if (tangent.x * horizDir.x + tangent.y * horizDir.y < 0.f)
-                    tangent = tangent * -1.f;
-            }
-            if (tangent.Length() > 0.01f)
-            {
-                tangent.Normalize();
-                std::vector<Vec3> scanPoints;
-                scanPoints.reserve(48);
-                scanPoints.push_back(initial.endpos);
-
-                constexpr float k_step = 16.f;
-                constexpr int   k_maxSteps = 48;
-                constexpr float k_probeDepth = 48.f;
-                constexpr float k_normalCohere = 0.8f;
-                Vec3 probeRef = initial.endpos;
-                for (int i = 0; i < k_maxSteps; ++i)
-                {
-                    probeRef = probeRef + tangent * k_step;
-                    TraceFilterWorldProps f2; f2.Setup(pLocal);
-                    GameTrace_t t{};
-                    TraceLine(probeRef + wallNormal * k_probeDepth, probeRef - wallNormal * k_probeDepth, MASK_PLAYERSOLID, &f2, &t);
-                    if (t.fraction >= 1.f || t.startsolid) break;
-                    if (t.plane.normal.x * wallNormal.x + t.plane.normal.y * wallNormal.y + t.plane.normal.z * wallNormal.z < k_normalCohere) break;
-                    scanPoints.push_back(t.endpos);
-                    probeRef = t.endpos + wallNormal * 0.5f;
-                }
-                runs = PsTrajUncoveredRuns(scanPoints, PsTrajLevelName(), 6.f);   // locks inside: call before ours
-            }
-        }
-    }
-    std::lock_guard<std::mutex> l(s_psTrajLock);
-    s_psTrajLive = std::move(runs);
-    s_psTrajLiveMs = GetTickCount64();
-}
-
-// render-thread snapshot: current map's recorded segments only, each >= 2 points; `live` = the
-// full-trajectory runs (empty when off or stale)
-void PS_GetTrajectory(std::vector<std::vector<Vec3>>& out, std::vector<std::vector<Vec3>>& live)
-{
+        std::vector<Vec3> pts;
+        const Vec3 d = b - a;
+        const int n = std::clamp((int)ceilf(d.Length() / 8.f), 1, 512);
+        for (int i = 0; i <= n; i++) pts.push_back(a + d * (float(i) / float(n)));
+        return pts;
+    };
     std::lock_guard<std::mutex> l(s_psTrajLock);
     out.clear();
-    live.clear();
     const char* map = PsTrajLevelName();
     for (const PsTrajSegment& seg : s_psTrajSegments)
-        if (strncmp(seg.map, map ? map : "", sizeof(seg.map) - 1) == 0 && seg.points.size() >= 2)
-            out.push_back(seg.points);
-    if (g_psLinesFull && GetTickCount64() - s_psTrajLiveMs < 250ull)
-        live = s_psTrajLive;
+        if (strncmp(seg.map, map ? map : "", sizeof(seg.map) - 1) == 0)
+            out.push_back(cut(seg.a, seg.b));
+    if (s_psTrajWalking.size() == 2)
+        out.push_back(cut(s_psTrajWalking[0], s_psTrajWalking[1]));
+}
+
+// menu thread. A walk in flight still lands its line when it finishes
+void PS_ClearTrajectory()
+{
+    std::lock_guard<std::mutex> l(s_psTrajLock);
+    s_psTrajSegments.clear();
 }
 
 // botox's pixel_surf, then the flags published under their old names
@@ -810,7 +551,6 @@ static void PixelSurf(void* pLocal, UserCmd_t* pCmd)
     s_pixelSurfTicks  = s_psTicks;
 
     PsTrajectoryRecord(pLocal, pCmd);
-    PsTrajectoryLive(pLocal);
 
     if (s_psRidingNow)
     {

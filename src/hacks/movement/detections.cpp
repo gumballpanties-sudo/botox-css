@@ -79,7 +79,7 @@ void Detections_Tick(const DetTick& t)
     // botox run_detections prev_ok / prev_vz, read before DetEbStep rolls them (points: jb / head)
     const bool prevOk = eb.prevAir && eb.prevTick == t.tick - 1;
     const float prevVz = eb.prevVz;
-    if (DetEbStep(eb, st, g, t.tb, t.ps))
+    if (DetEbStep(eb, st, g, t.tb || t.tbOwns, t.ps))
     {
         ++chain;
         if (!g_detectionStackEb) PrintEb(chain);

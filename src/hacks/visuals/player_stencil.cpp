@@ -42,13 +42,21 @@ namespace
 	bool                         s_failed = false;
 	std::atomic<bool>            s_glowLive{ false };
 
-	IDirect3DSurface9* s_msaaSurf = nullptr, *s_maskSurf = nullptr, *s_distSurf = nullptr, *s_blurSurf = nullptr;
-	IDirect3DTexture9* s_maskTex = nullptr, *s_distTex = nullptr, *s_blurTex = nullptr;
-	UINT s_w = 0, s_h = 0;
-	D3DFORMAT s_fmt = D3DFMT_UNKNOWN;
-	D3DMULTISAMPLE_TYPE s_ms = D3DMULTISAMPLE_NONE;
-	DWORD s_msq = 0;
-	IDirect3DDevice9* s_dev = nullptr;   // the device every resource above belongs to
+	// Two independent target sets, same shaders: 0 = live (screen size), 1 = esp preview (its own
+	// small target). Keeping them apart means neither rebuilds the other's D3DPOOL_DEFAULT
+	// textures every single frame just because the two sizes differ (Build() below would otherwise
+	// see a size mismatch and call ReleaseTargets()+recreate on every draw, live and preview alike).
+	enum { kLive = 0, kPreview = 1, kInstances = 2 };
+	struct Targets {
+		IDirect3DSurface9* msaaSurf = nullptr, *maskSurf = nullptr, *distSurf = nullptr, *blurSurf = nullptr;
+		IDirect3DTexture9* maskTex = nullptr, *distTex = nullptr, *blurTex = nullptr;
+		UINT w = 0, h = 0;
+		D3DFORMAT fmt = D3DFMT_UNKNOWN;
+		D3DMULTISAMPLE_TYPE ms = D3DMULTISAMPLE_NONE;
+		DWORD msq = 0;
+	};
+	Targets s_t[kInstances];
+	IDirect3DDevice9* s_dev = nullptr;   // the device every resource above belongs to (both instances)
 
 	template <size_t N>
 	std::vector<DWORD> Code(const BYTE (&bytes)[N])   // BYTE arrays carry no alignment: copy into DWORDs
@@ -58,12 +66,14 @@ namespace
 		return c;
 	}
 
-	void ReleaseTargets()
+	void ReleaseTargets(int inst)
 	{
-		for (IDirect3DSurface9** s : { &s_msaaSurf, &s_maskSurf, &s_distSurf, &s_blurSurf }) if (*s) { (*s)->Release(); *s = nullptr; }
-		for (IDirect3DTexture9** t : { &s_maskTex, &s_distTex, &s_blurTex }) if (*t) { (*t)->Release(); *t = nullptr; }
-		s_w = s_h = 0; s_fmt = D3DFMT_UNKNOWN; s_ms = D3DMULTISAMPLE_NONE; s_msq = 0;
+		Targets& t = s_t[inst];
+		for (IDirect3DSurface9** s : { &t.msaaSurf, &t.maskSurf, &t.distSurf, &t.blurSurf }) if (*s) { (*s)->Release(); *s = nullptr; }
+		for (IDirect3DTexture9** tex : { &t.maskTex, &t.distTex, &t.blurTex }) if (*tex) { (*tex)->Release(); *tex = nullptr; }
+		t.w = t.h = 0; t.fmt = D3DFMT_UNKNOWN; t.ms = D3DMULTISAMPLE_NONE; t.msq = 0;
 	}
+	void ReleaseAllTargets() { for (int i = 0; i < kInstances; ++i) ReleaseTargets(i); }
 
 	bool EnsureShaders(IDirect3DDevice9* dev)
 	{
@@ -90,31 +100,33 @@ namespace
 		return ok;
 	}
 
-	bool Build(IDirect3DDevice9* dev, const D3DSURFACE_DESC& d)
+	bool Build(IDirect3DDevice9* dev, const D3DSURFACE_DESC& d, int inst)
 	{
-		if (s_maskTex && s_w == d.Width && s_h == d.Height && s_fmt == d.Format && s_ms == d.MultiSampleType && s_msq == d.MultiSampleQuality)
+		Targets& t = s_t[inst];
+		if (t.maskTex && t.w == d.Width && t.h == d.Height && t.fmt == d.Format && t.ms == d.MultiSampleType && t.msq == d.MultiSampleQuality)
 			return true;
-		ReleaseTargets();
-		auto make = [&](IDirect3DTexture9*& t, IDirect3DSurface9*& s, D3DFORMAT f) {
-			return SUCCEEDED(dev->CreateTexture(d.Width, d.Height, 1, D3DUSAGE_RENDERTARGET, f, D3DPOOL_DEFAULT, &t, nullptr)) && SUCCEEDED(t->GetSurfaceLevel(0, &s));
+		ReleaseTargets(inst);
+		auto make = [&](IDirect3DTexture9*& tex, IDirect3DSurface9*& s, D3DFORMAT f) {
+			return SUCCEEDED(dev->CreateTexture(d.Width, d.Height, 1, D3DUSAGE_RENDERTARGET, f, D3DPOOL_DEFAULT, &tex, nullptr)) && SUCCEEDED(tex->GetSurfaceLevel(0, &s));
 		};
-		bool ok = make(s_maskTex, s_maskSurf, d.Format) && make(s_distTex, s_distSurf, d.Format)
-			&& (make(s_blurTex, s_blurSurf, D3DFMT_A16B16G16R16F) || make(s_blurTex, s_blurSurf, d.Format));
+		bool ok = make(t.maskTex, t.maskSurf, d.Format) && make(t.distTex, t.distSurf, d.Format)
+			&& (make(t.blurTex, t.blurSurf, D3DFMT_A16B16G16R16F) || make(t.blurTex, t.blurSurf, d.Format));
 		if (ok && d.MultiSampleType != D3DMULTISAMPLE_NONE)
-			ok = SUCCEEDED(dev->CreateRenderTarget(d.Width, d.Height, d.Format, d.MultiSampleType, d.MultiSampleQuality, FALSE, &s_msaaSurf, nullptr));
+			ok = SUCCEEDED(dev->CreateRenderTarget(d.Width, d.Height, d.Format, d.MultiSampleType, d.MultiSampleQuality, FALSE, &t.msaaSurf, nullptr));
 		if (!ok)
 		{
-			DebugLog("player stencil: target creation failed (%ux%u fmt %d ms %d)", d.Width, d.Height, (int)d.Format, (int)d.MultiSampleType);
-			ReleaseTargets();
+			DebugLog("player stencil: target creation failed (inst %d, %ux%u fmt %d ms %d)", inst, d.Width, d.Height, (int)d.Format, (int)d.MultiSampleType);
+			ReleaseTargets(inst);
 			return false;
 		}
-		s_w = d.Width; s_h = d.Height; s_fmt = d.Format; s_ms = d.MultiSampleType; s_msq = d.MultiSampleQuality;
-		DebugLog("player stencil: targets %ux%u (msaa %d)", s_w, s_h, (int)s_ms);
+		t.w = d.Width; t.h = d.Height; t.fmt = d.Format; t.ms = d.MultiSampleType; t.msq = d.MultiSampleQuality;
+		DebugLog("player stencil: targets (inst %d) %ux%u (msaa %d)", inst, t.w, t.h, (int)t.ms);
 		return true;
 	}
 
-	bool Draw(IDirect3DDevice9* dev, IDirect3DSurface9* target, IDirect3DSurface9* depthStencil, const PlayerStencilSettings& st)
+	bool Draw(IDirect3DDevice9* dev, IDirect3DSurface9* target, IDirect3DSurface9* depthStencil, const PlayerStencilSettings& st, int inst)
 	{
+		Targets& tg = s_t[inst];   // "tg": the function already uses `t` as a local "top" coordinate below
 		IDirect3DPixelShader9* oldPs = nullptr;
 		IDirect3DVertexShader9* oldVs = nullptr;
 		IDirect3DVertexDeclaration9* oldDecl = nullptr;
@@ -155,8 +167,8 @@ namespace
 		for (size_t i = 0; i < std::size(kStates); ++i) { dev->GetRenderState(kStates[i], &oldStates[i]); dev->SetRenderState(kStates[i], kValues[i]); }
 		for (size_t i = 0; i < std::size(kSamplers); ++i) { dev->GetSamplerState(0, kSamplers[i], &oldSamplers[i]); dev->SetSamplerState(0, kSamplers[i], kSamplerValues[i]); }
 
-		const float W = float(s_w), H = float(s_h);
-		const D3DVIEWPORT9 fullVp{ 0, 0, s_w, s_h, 0.f, 1.f };
+		const float W = float(tg.w), H = float(tg.h);
+		const D3DVIEWPORT9 fullVp{ 0, 0, tg.w, tg.h, 0.f, 1.f };
 		// botox draw_rect: pixel rect, uv = px / size, -0.5 = pixel centres on texels
 		auto rect = [&](float l, float t, float r, float b) {
 			auto cx = [&](float px) { return (px - 0.5f) / W * 2.f - 1.f; };
@@ -185,7 +197,7 @@ namespace
 		dev->SetPixelShaderConstantF(11, st.innerInvisible, 1);
 
 		// ---- mask: red where 2 <= stencil < 128 (visible), green where stencil == 1 (occluded) ----
-		dev->SetRenderTarget(0, s_msaaSurf ? s_msaaSurf : s_maskSurf);
+		dev->SetRenderTarget(0, tg.msaaSurf ? tg.msaaSurf : tg.maskSurf);
 		dev->Clear(0, nullptr, D3DCLEAR_TARGET, D3DCOLOR_ARGB(0, 0, 0, 0), 1.f, 0);
 		dev->SetRenderState(D3DRS_STENCILENABLE, TRUE);
 		dev->SetPixelShader(s_ps[PS_FILL]);
@@ -208,17 +220,17 @@ namespace
 		dev->SetRenderState(D3DRS_STENCILENABLE, FALSE);
 		dev->SetRenderState(D3DRS_COLORWRITEENABLE, 0x0f);
 
-		const bool masked = !s_msaaSurf || SUCCEEDED(dev->StretchRect(s_msaaSurf, nullptr, s_maskSurf, nullptr, D3DTEXF_NONE));
+		const bool masked = !tg.msaaSurf || SUCCEEDED(dev->StretchRect(tg.msaaSurf, nullptr, tg.maskSurf, nullptr, D3DTEXF_NONE));
 		dev->SetDepthStencilSurface(nullptr);
 
 		if (masked)
 		{
 			// ponytail: full-target offscreen passes, empty pixels still run every tap; scissor to the
 			// player boxes if it ever shows in frame time (botox's own note)
-			dev->SetTexture(0, s_maskTex);
+			dev->SetTexture(0, tg.maskTex);
 			if (st.outline)
 			{
-				dev->SetRenderTarget(0, s_distSurf);
+				dev->SetRenderTarget(0, tg.distSurf);
 				dev->SetPixelShader(s_ps[PS_ROWS]);
 				rect(0.f, 0.f, W, H);
 			}
@@ -226,7 +238,7 @@ namespace
 			if (st.inner && !(st.innerBones && st.nCapsules == 0))
 			{
 				dev->SetPixelShaderConstantF(7, st.innerReach, 1);
-				dev->SetRenderTarget(0, s_blurSurf);
+				dev->SetRenderTarget(0, tg.blurSurf);
 				if (st.innerBones)
 				{
 					struct CapVert { float x, y, z, w, s[4], r[4]; };
@@ -275,19 +287,19 @@ namespace
 				dev->SetRenderState(D3DRS_COLORWRITEENABLE, D3DCOLORWRITEENABLE_RED | D3DCOLORWRITEENABLE_GREEN | D3DCOLORWRITEENABLE_BLUE);
 				dev->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_ONE);
 				dev->SetPixelShader(s_ps[st.innerBones ? PS_BONE : PS_INNER]);
-				dev->SetTexture(0, s_blurTex);
+				dev->SetTexture(0, tg.blurTex);
 				rect(vl, vt, vr, vb);
 
 				dev->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
 				dev->SetRenderState(D3DRS_COLORWRITEENABLE, 0x0f);
 				dev->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
-				dev->SetTexture(0, s_maskTex);
+				dev->SetTexture(0, tg.maskTex);
 				dev->SetPixelShaderConstantF(7, st.gradient, 1);
 			}
 
 			if (st.glow)
 			{
-				dev->SetRenderTarget(0, s_blurSurf);
+				dev->SetRenderTarget(0, tg.blurSurf);
 				dev->SetPixelShader(s_ps[PS_BLUR]);
 				rect(0.f, 0.f, W, H);
 			}
@@ -299,14 +311,14 @@ namespace
 			{
 				dev->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_ONE);
 				dev->SetPixelShader(s_ps[PS_GLOW]);
-				dev->SetTexture(0, s_blurTex);
+				dev->SetTexture(0, tg.blurTex);
 				rect(vl, vt, vr, vb);
 				dev->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
 			}
 			if (st.outline)
 			{
 				dev->SetPixelShader(s_ps[PS_COLUMNS]);
-				dev->SetTexture(0, s_distTex);
+				dev->SetTexture(0, tg.distTex);
 				rect(vl, vt, vr, vb);
 			}
 		}
@@ -330,14 +342,16 @@ namespace
 		return masked;
 	}
 
-	// botox execute(): render thread (queued) or the main thread under mat_queue_mode 0
-	void Execute(const PlayerStencilSettings& st)
+	// botox execute(): render thread (queued) or the main thread under mat_queue_mode 0. inst picks
+	// which of the two target sets (live / preview) this queued call draws into; Execute reads
+	// whatever is bound on dev at the time it actually runs (see PlayerStencil_Submit's ordering note).
+	void Execute(const PlayerStencilSettings& st, int inst)
 	{
 		IDirect3DDevice9* dev = g_d3dDev;
 		bool drawn = false;
 		if (dev && dev != s_dev)   // new device (or first run): everything we hold is someone else's
 		{
-			ReleaseTargets();
+			ReleaseAllTargets();
 			for (auto*& p : s_ps) p = nullptr;
 			s_capsuleVs = nullptr; s_capsuleDecl = nullptr; s_failed = false;
 			s_dev = dev;
@@ -350,42 +364,63 @@ namespace
 			D3DSURFACE_DESC d{}, dd{};
 			// the stencil test reads the engine's depth-stencil: the mask target must match its samples and fit inside it
 			if (ds && SUCCEEDED(target->GetDesc(&d)) && SUCCEEDED(ds->GetDesc(&dd)) && dd.MultiSampleType == d.MultiSampleType
-				&& dd.MultiSampleQuality == d.MultiSampleQuality && dd.Width >= d.Width && dd.Height >= d.Height && Build(dev, d))
-				drawn = Draw(dev, target, ds, st);
+				&& dd.MultiSampleQuality == d.MultiSampleQuality && dd.Width >= d.Width && dd.Height >= d.Height && Build(dev, d, inst))
+				drawn = Draw(dev, target, ds, st, inst);
 			if (ds) ds->Release();
 			target->Release();
 		}
-		if (st.glow)
+		// CSS-specific: live-only. s_glowLive feeds PlayerStencil_GlowLive(), which the LIVE
+		// Glow_Render reads to decide whether the engine's own halo backs off (botox glow_enabled()
+		// exclusivity, no TF2 analog -- TF2 dropped the legacy/full-glow split entirely). A preview
+		// draw must never flip this, or opening the esp preview while the live full-res glow is on
+		// would wrongly re-arm the live screen's material-system halo.
+		if (st.glow && inst == kLive)
 			s_glowLive.store(drawn, std::memory_order_relaxed);
-		static bool s_logged = false;
-		if (!s_logged && drawn)
+		static bool s_loggedLive = false, s_loggedPreview = false;
+		bool& logged = inst == kPreview ? s_loggedPreview : s_loggedLive;
+		if (!logged && drawn)
 		{
-			s_logged = true;
-			DebugLog("player stencil: first pass drawn (outline %d glow %d inner %d bones %d, %d capsules)",
-				st.outline, st.glow, st.inner, st.innerBones, st.nCapsules);
+			logged = true;
+			DebugLog("player stencil: first pass drawn (inst %d, outline %d glow %d inner %d bones %d, %d capsules)",
+				inst, st.outline, st.glow, st.inner, st.innerBones, st.nCapsules);
 		}
 	}
 
 	// ---- fake CFunctors (screenfx.cpp "the call queue"): one per ring slot, so a queued frame
-	// keeps its own settings while the main thread fills the next ----
+	// keeps its own settings while the main thread fills the next. One shared ring for both
+	// instances (each slot remembers which instance it was submitted for) -- plenty: live submits
+	// at most once a frame and preview at most 60 times a second, never both mid-flight per slot ----
 	struct StencilFunctor { void** vfptr; int slot; };
 	PlayerStencilSettings s_ring[4];
+	int s_ringInstance[4] = {};
 	unsigned s_next = 0;
 	int   __fastcall Fn_AddRef(void*)           { return 1; }
 	int   __fastcall Fn_Release(void*)          { return 1; }
 	void* __fastcall Fn_Dtor(void* p, unsigned) { return p; }
-	void  __fastcall Fn_Call(void* p)           { MiscHookGuard _g; Execute(s_ring[static_cast<StencilFunctor*>(p)->slot]); }
+	void  __fastcall Fn_Call(void* p)
+	{
+		MiscHookGuard _g;
+		const int slot = static_cast<StencilFunctor*>(p)->slot;
+		Execute(s_ring[slot], s_ringInstance[slot]);
+	}
 	void* s_vt[4] = { (void*)&Fn_AddRef, (void*)&Fn_Release, (void*)&Fn_Dtor, (void*)&Fn_Call };
 	StencilFunctor s_fn[4] = { { s_vt, 0 }, { s_vt, 1 }, { s_vt, 2 }, { s_vt, 3 } };
 }
 
-void PlayerStencil_Submit(const PlayerStencilSettings& s)
+void PlayerStencil_Submit(const PlayerStencilSettings& s, bool bPreview)
 {
 	if (s_failed || !g_d3dDev) return;
 	const int slot = int(s_next++ & 3);
 	s_ring[slot] = s;
+	s_ringInstance[slot] = bPreview ? kPreview : kLive;
 	// the glow pass's draws are still in the shaderapi's dynamic buffers: push them out first,
-	// or the mask reads a stencil the players are not in yet (screenfx.cpp ScreenFx_FlushRenderContext)
+	// or the mask reads a stencil the players are not in yet (screenfx.cpp ScreenFx_FlushRenderContext).
+	// Both this flush and the functor below go through the SAME ICallQueue as every other main-thread
+	// render call (SetRenderTarget, the model draws, DrawScreenSpaceRectangle, ...), replayed strictly
+	// in enqueue order: as long as the caller (Glow_Render / Glow_RenderPreview) queues this submit
+	// before it ever issues a later SetRenderTarget back off its target, Execute's dev->GetRenderTarget(0)
+	// still reads that target when this functor actually runs. For the preview that holds because
+	// EspPreview pops its render target/view only after Glow_RenderPreview (and this Submit) returns.
 	ScreenFx_FlushRenderContext();
 	if (!ScreenFx_QueueFunctor(&s_fn[slot]))
 		Fn_Call(&s_fn[slot]);   // mat_queue_mode 0: this thread issues the d3d
@@ -393,4 +428,4 @@ void PlayerStencil_Submit(const PlayerStencilSettings& s)
 
 bool PlayerStencil_GlowLive() { return s_glowLive.load(std::memory_order_relaxed); }
 bool PlayerStencil_Failed() { return s_failed; }
-void PlayerStencil_ReleaseTargets() { ReleaseTargets(); }
+void PlayerStencil_ReleaseTargets() { ReleaseAllTargets(); }

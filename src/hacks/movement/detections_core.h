@@ -13,15 +13,21 @@ struct DetEb
 {
     bool  prevAir = false;
     float prevVz = 0.f, prevSpeed = 0.f;
-    int   prevTick = 0, candTick = 0, lastBugTick = 0;
+    int   prevTick = 0, candTick = 0, lastBugTick = 0, tbTick = 0;
     float candVz = 0.f;
 };
 
-// g = sv_gravity * 0.5 * interval. tb/ps = those tricks own this tick (veto, their pins look the
-// same). Returns the tick the bug happened in, 0 = none.
-inline int DetEbStep(DetEb& s, const DetStart& st, float g, bool tb, bool ps)
+// TB pin shows in the START one cmd after its hit, and rides go pin/park/re-pin (park = owns, no
+// hit), so a tb flag on this cmd alone misses most rides -> veto while TB acted within this window
+constexpr int k_detTbWindow = 3;
+
+// g = sv_gravity * 0.5 * interval. tb = TB hit or owned this cmd, ps = PS owns it (veto, their pins
+// look the same). Returns the tick the bug happened in, 0 = none.
+inline int DetEbStep(DetEb& s, const DetStart& st, float g, bool tbNow, bool ps)
 {
     const bool prevOk = s.prevAir && s.prevTick == st.tick - 1;
+    if (tbNow) s.tbTick = st.tick;
+    const bool tb = s.tbTick && st.tick - s.tbTick >= 0 && st.tick - s.tbTick <= k_detTbWindow;
     int bug = 0;
 
     if (s.candTick && st.tick == s.candTick + 1 && !tb

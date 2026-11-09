@@ -194,11 +194,36 @@ namespace we
     // the search stops once a landing keeps your speed within 0.5
     inline bool PhDone(const PhPlan& b, float speed0) { return b.found && speed0 - 0.5f <= b.speed; }
     // not ref: a steered land on the floor your OWN move lands on anyway (log 11-08: face3 move 0.05 for
-    // 3 ticks, z 17 -> 0) is a plain bhop that ate your strafe. A pixel hop is a surface you'd miss
-    inline bool PhSameFloor(bool ownFound, float ownZ, float landZ) { return ownFound && std::fabs(landZ - ownZ) < 1.f; }
+    // 3 ticks, z 17 -> 0) is a plain bhop that ate your strafe. A pixel hop is a surface you'd miss.
+    // 11-09: anything BELOW your own floor too (steering off the ledge you'd land on is never a hop)
+    inline bool PhSameFloor(bool ownFound, float ownZ, float landZ) { return ownFound && landZ < ownZ + 1.f; }
+    // sim prune: falling with feet already under own floor + 1 = every later landing fails PhSameFloor.
+    // Valid after tick 1: CSS air duck/unduck moves the origin on its FIRST tick only (FinishDuck :820), no
+    // air step-up, so z only drops while vz <= 0
+    inline bool PhCantRise(bool ownFound, float ownZ, float z, float vz) { return ownFound && vz <= 0.f && z < ownZ + 1.f; }
     // CPU skip (not ref, same answer): CategorizePosition reads vz after the half-gravity step and never grounds
-    // above NON_JUMP_VELOCITY 140 (gamemovement.cpp:3810). 3-tick horizon = vz0 - 5h at its last check
-    inline bool PhCanLand(float vz0, float h) { return vz0 - 5.f * h <= 140.f; }
+    // above NON_JUMP_VELOCITY 140 (gamemovement.cpp:3810). Last check of an n-tick horizon = vz0 - (2n-1)h
+    inline bool PhCanLand(float vz0, float h, int horizon = 3) { return vz0 - (float)(2 * horizon - 1) * h <= 140.f; }
+
+    // reach (not ref, 11-09): no land within 3 ticks = fly a held wish for up to N ticks at yaw offsets off your
+    // velocity, least turn first, and steer onto the first one that grounds above your own floor. Grid order:
+    // offset ascending, + side, - side, your stance then flipped. Rolled across cmds like the 384 roll
+    constexpr float k_phReachOff[] = { 0.f, 8.f, 16.f, 25.f, 35.f, 45.f, 60.f, 75.f, 90.f, 110.f, 135.f };
+    constexpr int   k_phReachN     = (int)(sizeof(k_phReachOff) / sizeof(k_phReachOff[0]));
+    constexpr int   k_phReachSteps = k_phReachN * 4;   // x side x stance (0 has one side: its - twin = itself)
+    struct PhReachStep { float off; bool flipDuck; bool skip; };
+    // skip = past the max turn, or offset 0's duplicate - side
+    inline PhReachStep PhReachAt(int i, float maxOff)
+    {
+        i = ((i % k_phReachSteps) + k_phReachSteps) % k_phReachSteps;
+        const int   r   = i >> 2;
+        const float off = k_phReachOff[r];
+        PhReachStep s;
+        s.off      = (i & 1) ? -off : off;
+        s.flipDuck = (i & 2) != 0;
+        s.skip     = off > maxOff + 1e-3f || (off == 0.f && (i & 1));
+        return s;
+    }
     // world wish yaw = face yaw turned AWAY from your along-face velocity (ref sign; ref turns with it)
     inline float PhwSign(float velYaw, float wallYaw) { return NormYaw(velYaw - wallYaw) < 0.f ? 1.f : -1.f; }
     constexpr float k_phwVelOff[]  = { 0.f, -20.f, 20.f, -45.f, 45.f, -70.f, 70.f, -90.f, 90.f };              // (no face)

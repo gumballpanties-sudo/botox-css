@@ -392,6 +392,13 @@ static void Page_MovementMain()
             ImGui::OptionPopup("pixel hop settings", [&]() {
                 ImGui::Label("pixel hop keybind");
                 ImGui::Keybind("pixel hop key", &g_pixelHopKey, &g_pixelHopMode);
+                // steer onto a pixel hop up to N ticks out (wallengine.inl reach pass)
+                ImGui::Checkbox("reach pixel hops", &g_phReach);
+                if (g_phReach)
+                {
+                    SliderI("reach ticks##phreach", &g_phReachTicks, 4, 32);
+                    SliderF("max steer##phreach", &g_phReachAngle, 8.f, 135.f, "%.0f deg");
+                }
             }, ImVec2(220.f, -1));
 
         ImGui::Checkbox("wall climb", &g_wallClimb);
@@ -440,8 +447,6 @@ static void Page_MovementMain()
     // "pixel surf" groups -- folded back into one "other" group, botox order, 11-04.
     if (menu_group_begin("other"))
     {
-        ImGui::Checkbox("128 tick fix", &g_tickFix128);
-
         UnitA_Menu_SmoothDemoView();
 
         // botox "pixel surf fix" (m_pixel_surf_fix): CSS's matching hold-duck-into-ride var
@@ -505,6 +510,9 @@ static void Page_MovementMain()
                 // separate defaults (m_pixel_finder_texturebugs true, _map_texturebugs false).
                 ImGui::Checkbox("map texturebugs##pf", &g_psFinderMapTb);
                 ImGui::Checkbox("show map lines##pm", &g_psMapLines);
+                // skybox seams sit thousands of units out: cap how far map marks draw (0 = all)
+                SliderF("max visible distance##pm", &g_psMapMaxDist, 0.f, 8192.f,
+                        g_psMapMaxDist <= 0.f ? "no limit" : "%.0f");
                 if (ms.busy || ms.lines > 0 || ms.tb > 0)
                 {
                     char pmInfo[96];

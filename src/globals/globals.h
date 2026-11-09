@@ -679,6 +679,7 @@ extern bool g_wcViz;           // botox m_wall_climb_visualize
 extern float g_wcVizColor[4];
 extern bool g_airStuck;    extern int g_airStuckKey;    extern int g_airStuckMode;
 extern bool g_pixelHop;    extern int g_pixelHopKey;    extern int g_pixelHopMode;   // ref pixel hop (wallengine.inl)
+extern bool g_phReach;     extern int g_phReachTicks;   extern float g_phReachAngle; // PH reach: steer onto a land N ticks out
 
 // -- Unit A port (movement_ex.inl): small tricks from botox csgo-sdk, defaults OFF ---------------
 extern bool g_nulls;
@@ -745,6 +746,7 @@ extern bool  g_psFinderTb;         // also mark texturebug seams on the column (
 extern bool  g_psFinderNoProps;    // finder traces refuse props (static + prop_* ents)
 extern bool  g_psFinderLength;     // walk each found surf along its wall, draw how long it runs (ref finder_length)
 extern bool  g_psMapLines;         // show whole-map scan lines -- survives the finder going off
+extern float g_psMapMaxDist;       // max visible distance of map-scan marks (0 = no limit; skybox = far)
 extern bool g_psAssist;    extern int g_psAssistKey;    extern int g_psAssistMode;
 extern int  g_psSetPointKey;       // save aimed finder point as assist target (edge press)
 extern int  g_psDeletePointKey;    // delete aimed finder/assist point (edge press)
@@ -904,6 +906,7 @@ extern int  g_offViewOffset;    // m_vecViewOffset[0] -- eye pos (PS finder/assi
 extern int  g_offItemDefIndex;  // m_iItemDefinitionIndex (DT_EconEntity) -- Atomizer detect
 extern int  g_offTeamNum;       // m_iTeamNum -- friendly team brushes are not solid to us
 extern int  g_offCollGroup;     // m_CollisionGroup -- solid-to-player-movement objects still are
+extern int  g_offSkyArea;       // m_Local.m_skybox3d.area -- 3D skybox BSP area, 255 = none
 // The interp-removal netvars that used to sit here (m_flSimulationTime, m_flOldSimulationTime,
 // m_iObserverMode, m_hObserverTarget, m_PlayerAnimState, m_flTauntYaw, m_bAllowMoveDuringTaunt,
 // m_nPlayerCondEx2, m_flCycle, m_nSequence, m_bSequenceLoops) went with that feature. Eight of

@@ -412,6 +412,11 @@ __declspec(noinline) static bool CalcViewModel_ApplyOffset(const void* pEyePosit
 void __fastcall h_CalcViewModelView(void* rcx, void* owner, void* pEyePosition, void* pEyeAngles)
 {
     if (g_eject) { o_CalcViewModelView(rcx, owner, pEyePosition, pEyeAngles); return; }
+    // ItemPostFrame (baseplayer_shared.cpp:233) calls this every predicted usercmd. Base skips bob
+    // there (baseviewmodel_shared.cpp:398); stepping ours on tickbase curtime + old velocities
+    // made the render frame reuse it = vm jitters up/down at tick rate. Render call only.
+    if (g_prediction && reinterpret_cast<const unsigned char*>(g_prediction)[kPredOff_InPrediction])
+    { o_CalcViewModelView(rcx, owner, pEyePosition, pEyeAngles); return; }
     ++g_miscHookDepth;
     struct Dec { ~Dec() { --g_miscHookDepth; } } _dec;
 

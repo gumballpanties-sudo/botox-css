@@ -161,13 +161,8 @@ extern int*  g_randomSeed;
 extern bool  g_predReady;
 extern bool  g_frameReady;   // restore + setabs sigs resolved -> probe features usable
 
-// botox "128 tick fix" (n_tick::forced_128(), tick_scale.h): CSS is natively 64-tick fixed, but
-// the same correction still matters if the interval the engine hands back is ever stale/wrong
-// (spectating, a non-standard community server) -- forcing every tick-scaled search in this TU
-// onto 1/128 matches what botox's own checkbox does. g_tickFix128: cfg/u_mvcore.h.
 inline float TickInterval()
 {
-    if (g_tickFix128) return 1.f / 128.f;
     return g_globalVars ? g_globalVars->interval_per_tick : (1.f / 66.6667f);
 }
 

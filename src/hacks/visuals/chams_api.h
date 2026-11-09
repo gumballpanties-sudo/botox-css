@@ -31,6 +31,17 @@ void Glow_LevelUnload();   // no-op: RTs live across maps, remade only on a back
 void Glow_Render();        // screenfx.cpp DoPostScreenSpaceEffects, before the original: stencil + halo pass
 bool Glow_Rendering();     // true inside Glow_Render's model draws: h_DrawModelExecute passes straight through
 
+// ---- esp preview (hacks/visuals/esp_preview.cpp) ----
+// ITexture*, null if Glow_LevelInit's preview target creation failed. Plain void*: chams_api.h stays
+// engine-type-free, same as the rest of this header.
+void Glow_PreviewInit();   // esp preview: make its targets if no Glow_LevelInit did yet (game thread)
+void* Glow_PreviewTarget();
+// Glow_Render for one item -- the preview entity -- on the preview target: call right after the
+// preview's chams draw, still inside Push3DView with the preview RT bound (aim/chams.cpp has the
+// ordering proof). worldToProjection is EspPreview's own camera (float[4][4], row-major); pBones is
+// a matrix3x4 array of nBones entries off the drawn model; pHdr is its studiohdr_t*.
+void Glow_RenderPreview(void* pEnt, const float (*worldToProjection)[4], const void* pBones, int nBones, const void* pHdr);
+
 // IVModelRender::ForcedMaterialOverride (slot 1), installed by thread.cpp. The engine's own
 // overrides (invuln, burning, ...) are dropped while Glow_Rendering so the glow material stays.
 using ForcedMaterialOverride_t = void(__fastcall*)(void*, void*, int);

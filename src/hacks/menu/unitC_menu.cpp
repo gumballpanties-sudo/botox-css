@@ -2,6 +2,7 @@
 #include "menu.h"       // ImGui::OptionPopup / ColorRow
 #include "../../globals/globals.h"
 #include "../visuals/chams_layers.h"   // botox chams layer lists (config strings)
+#include "../visuals/esp_preview.h"    // g_espPreview, top-of-group "esp preview" checkbox
 #include <cstdio>
 #include <initializer_list>
 
@@ -19,6 +20,10 @@ static constexpr ImGuiColorEditFlags kPickerNoAlpha = ImGuiColorEditFlags_NoOpti
 // compensated" (backtrack removed). Player stencil / internal glow = aim/player_stencil.cpp.
 void UnitC_Menu_visuals_esp()
 {
+    // botox csgo-sdk menu_tab_visuals.cpp: "esp preview" sits above "players", own window right
+    // of the menu (menu.cpp, visuals > esp page only). See src/hacks/visuals/esp_preview.h.
+    ImGui::Checkbox("esp preview", &g_espPreview);
+
     const bool players = g_espEnable;
 
     ImGui::Checkbox("players", &g_espEnable);

@@ -235,6 +235,11 @@ static JsEnd s_jsEnd{};
 static void JsCaptureEnd(void* pLocal, UserCmd_t* pCmd)
 {
     if (!g_jumpstats) return;
+    // movers leave the entity wherever their last probe was -- PixelSurf / AutoAlign / TB / AS
+    // restore START and stop. Reading that as END = start ground == end ground every cmd = no
+    // takeoff ever = no line. So fly the final cmd from START here, read, put START back
+    RestoreToFrame(PredCommandsPredicted() - 1);
+    Pred_Simulate(pLocal, pCmd);
     s_jsEnd.ok      = true;
     s_jsEnd.ground  = (EntI(pLocal, g_offFlags) & FL_ONGROUND) != 0;
     s_jsEnd.walk    = EntMoveType(pLocal) == MOVETYPE_WALK;
@@ -242,6 +247,7 @@ static void JsCaptureEnd(void* pLocal, UserCmd_t* pCmd)
     s_jsEnd.vel     = EntV3(pLocal, g_offVelocity);
     s_jsEnd.buttons = pCmd->buttons;
     s_jsEnd.mouseDx = pCmd->mousedx;
+    RestoreToFrame(PredCommandsPredicted() - 1);
 }
 
 static void JumpstatsTick(UserCmd_t* pCmd, bool trick)
