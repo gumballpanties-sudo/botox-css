@@ -40,7 +40,7 @@ void* Glow_PreviewTarget();
 // preview's chams draw, still inside Push3DView with the preview RT bound (aim/chams.cpp has the
 // ordering proof). worldToProjection is EspPreview's own camera (float[4][4], row-major); pBones is
 // a matrix3x4 array of nBones entries off the drawn model; pHdr is its studiohdr_t*.
-void Glow_RenderPreview(void* pEnt, const float (*worldToProjection)[4], const void* pBones, int nBones, const void* pHdr);
+void Glow_RenderPreview(void* pEnt, void* pGun /*held weapon ent, may be null*/, const float (*worldToProjection)[4], const void* pBones, int nBones, const void* pHdr);
 
 // IVModelRender::ForcedMaterialOverride (slot 1), installed by thread.cpp. The engine's own
 // overrides (invuln, burning, ...) are dropped while Glow_Rendering so the glow material stays.

@@ -126,12 +126,12 @@ namespace
 	}
 
 	// ---- material table (botox impl_t::m_materials[index][ignorez]) ----
+	// No IMaterialVar* kept here: a material reload rebuilds the var array (the IncRef keeps the
+	// IMaterial, not its vars), and a held var then crashes in SetVecValue (botox-tf2 crash.log 11-09
+	// DrawLayers / GlowPasses_SEH, garbage vtable). FindVar at use, like visuals.cpp does.
 	struct Mat
 	{
 		IMaterial*   pMat = nullptr;
-		ChamsMatVar* pEnvTint = nullptr;
-		ChamsMatVar* pPhongTint = nullptr;
-		ChamsMatVar* pFresnel = nullptr;   // $phongfresnelranges -- glow thickness
 		bool         bShared = false;      // ambient: one found material serves both variants
 	};
 	Mat  s_mats[ChamsLayers::Count][2];
@@ -174,14 +174,6 @@ namespace
 		return pMat;
 	}
 
-	void StoreVars(Mat& m)
-	{
-		if (!m.pMat) return;
-		m.pEnvTint   = FindVar(m.pMat, "$envmaptint");
-		m.pPhongTint = FindVar(m.pMat, "$phongtint");
-		m.pFresnel   = FindVar(m.pMat, "$phongfresnelranges");
-	}
-
 	// botox make_variants: the depth/fog flags are appended per variant, never inside `body`
 	// (FindKey returns the first match -- a duplicate would win).
 	void MakeVariants(int index, const char* name, const char* shader, const char* body)
@@ -195,7 +187,6 @@ namespace
 			sprintf_s(sName, "botox_chams_%s%s", name, v ? "_xqz" : "");
 			sprintf_s(sVMT, "\"%s\"\n{\n%s\t\"$model\" \"1\"\n%s}\n", shader, body, kFlags[v]);
 			s_mats[index][v].pMat = CreateFromVMT(sName, sVMT);
-			StoreVars(s_mats[index][v]);
 		}
 	}
 
@@ -244,7 +235,7 @@ namespace
 			if (pMat && !pMat->IsErrorMaterial())
 			{
 				pMat->IncrementReferenceCount();
-				for (int v = 0; v < 2; ++v) { s_mats[Ambient][v].pMat = pMat; s_mats[Ambient][v].bShared = true; StoreVars(s_mats[Ambient][v]); }
+				for (int v = 0; v < 2; ++v) { s_mats[Ambient][v].pMat = pMat; s_mats[Ambient][v].bShared = true; }
 			}
 			else
 				DebugLog("chams: debug/debugambientcube not found");
@@ -328,10 +319,11 @@ namespace
 	{
 		SetModulation(c, alphaScale);
 		const bool bGold = index == ChamsLayers::Gold;
-		if (m.pEnvTint)
-			bGold ? m.pEnvTint->SetVecValue(c[0] * kGoldEnv[0], c[1] * kGoldEnv[1], c[2] * kGoldEnv[2]) : m.pEnvTint->SetVecValue(c[0], c[1], c[2]);
-		if (m.pPhongTint)
-			bGold ? m.pPhongTint->SetVecValue(c[0] * kGoldPhong[0], c[1] * kGoldPhong[1], c[2] * kGoldPhong[2]) : m.pPhongTint->SetVecValue(c[0], c[1], c[2]);
+		if (!m.pMat) return;
+		if (auto pEnvTint = FindVar(m.pMat, "$envmaptint"))
+			bGold ? pEnvTint->SetVecValue(c[0] * kGoldEnv[0], c[1] * kGoldEnv[1], c[2] * kGoldEnv[2]) : pEnvTint->SetVecValue(c[0], c[1], c[2]);
+		if (auto pPhongTint = FindVar(m.pMat, "$phongtint"))
+			bGold ? pPhongTint->SetVecValue(c[0] * kGoldPhong[0], c[1] * kGoldPhong[1], c[2] * kGoldPhong[2]) : pPhongTint->SetVecValue(c[0], c[1], c[2]);
 	}
 
 	// one model draw through the original DrawModelExecute, optionally on other bones
@@ -920,7 +912,7 @@ namespace
 
 	void*         s_glowRB1 = nullptr, *s_glowRB2 = nullptr;      // ITexture*
 	IMaterial*    s_glowMatColor = nullptr, *s_glowMatHalo = nullptr, *s_glowMatBlurX = nullptr, *s_glowMatBlurY = nullptr;
-	ChamsMatVar*  s_glowBloom = nullptr;
+	bool          s_glowBloom = false;      // blury has $bloomamount (found at init; the var itself is looked up per pass)
 	int           s_glowW = 0, s_glowH = 0;
 	bool          s_glowReady = false;
 	volatile bool s_glowRendering = false;
@@ -931,7 +923,7 @@ namespace
 	// (called on every map's live-glow rebuild); a reinject makes them again under the same names, like rb1/rb2.
 	void*         s_previewTarget = nullptr, *s_previewRB1 = nullptr, *s_previewRB2 = nullptr;   // ITexture*
 	IMaterial*    s_previewMatHalo = nullptr, *s_previewMatBlurX = nullptr, *s_previewMatBlurY = nullptr;
-	ChamsMatVar*  s_previewBloom = nullptr;
+	bool          s_previewBloom = false;
 
 	struct GlowItem { CBaseEntity* pEnt; float c[4]; };
 	std::vector<GlowItem> s_glowItems;
@@ -988,8 +980,7 @@ namespace
 	// pRB1/pRB2 + the halo/blur materials are parameters (not the module statics) so Glow_RenderPreview
 	// can run the exact same passes against the preview target's own RTs/materials.
 	__declspec(noinline) void GlowPasses_SEH(void* rc, int w, int h, int iStencil, float flBlur, bool bHalo, IMaterial* pVisMat,
-	                                          void* pRB1, void* pRB2, IMaterial* pMatHalo, IMaterial* pMatBlurX, IMaterial* pMatBlurY,
-	                                          ChamsMatVar* pBloom)
+	                                          void* pRB1, void* pRB2, IMaterial* pMatHalo, IMaterial* pMatBlurX, IMaterial* pMatBlurY)
 	{
 		__try
 		{
@@ -1034,7 +1025,8 @@ namespace
 			VCallAt<void>(rc, kRcSetRT, pSavedRT);
 
 			// SetupEnd
-			if (flBlur > 0.f && pBloom)
+			ChamsMatVar* pBloom = flBlur > 0.f && pMatBlurY ? FindVar(pMatBlurY, "$bloomamount") : nullptr;   // fresh: see Mat
+			if (pBloom)
 			{
 				pBloom->SetFloatValue(flBlur);
 				VCallAt<void>(rc, kRcSetRT, pRB2);
@@ -1083,7 +1075,7 @@ namespace
 		s_glowReady = false;
 		auto Drop = [](IMaterial*& p) { if (p) { p->DecrementReferenceCount(); p->DeleteIfUnreferenced(); p = nullptr; } };
 		Drop(s_glowMatHalo); Drop(s_glowMatBlurX); Drop(s_glowMatBlurY); Drop(s_glowMatColor);
-		s_glowBloom = nullptr;
+		s_glowBloom = false;
 		if (s_glowRB1) { VCallAt<void>(s_glowRB1, kTexDecRef); s_glowRB1 = nullptr; }
 		if (s_glowRB2) { VCallAt<void>(s_glowRB2, kTexDecRef); s_glowRB2 = nullptr; }
 	}
@@ -1339,10 +1331,10 @@ void Glow_PreviewInit()
 			{
 				s_previewMatBlurX = CreateFromVMT("botox_glow_blurx_preview", "\"BlurFilterX\"\n{\n\t\"$basetexture\" \"botox_esp_preview_rb1\"\n}\n");
 				s_previewMatBlurY = CreateFromVMT("botox_glow_blury_preview", "\"BlurFilterY\"\n{\n\t\"$basetexture\" \"botox_esp_preview_rb2\"\n}\n");
-				s_previewBloom = s_previewMatBlurY ? FindVar(s_previewMatBlurY, "$bloomamount") : nullptr;
+				s_previewBloom = s_previewMatBlurY && FindVar(s_previewMatBlurY, "$bloomamount");
 			}
-			DebugLog("preview: render targets %dx%d ok, halo=%p blurx=%p blury=%p bloom=%p",
-				pw, ph, (void*)s_previewMatHalo, (void*)s_previewMatBlurX, (void*)s_previewMatBlurY, (void*)s_previewBloom);
+			DebugLog("preview: render targets %dx%d ok, halo=%p blurx=%p blury=%p bloom=%d",
+				pw, ph, (void*)s_previewMatHalo, (void*)s_previewMatBlurX, (void*)s_previewMatBlurY, (int)s_previewBloom);
 		}
 	}
 }
@@ -1382,12 +1374,12 @@ void Glow_LevelInit()
 	s_glowMatHalo  = CreateFromVMT("botox_glow_halo",  "\"UnlitGeneric\"\n{\n\t\"$basetexture\" \"botox_glow_rb1\"\n\t\"$additive\" \"1\"\n}\n");
 	s_glowMatBlurX = CreateFromVMT("botox_glow_blurx", "\"BlurFilterX\"\n{\n\t\"$basetexture\" \"botox_glow_rb1\"\n}\n");
 	s_glowMatBlurY = CreateFromVMT("botox_glow_blury", "\"BlurFilterY\"\n{\n\t\"$basetexture\" \"botox_glow_rb2\"\n}\n");
-	s_glowBloom = s_glowMatBlurY ? FindVar(s_glowMatBlurY, "$bloomamount") : nullptr;
+	s_glowBloom = s_glowMatBlurY && FindVar(s_glowMatBlurY, "$bloomamount");
 
 	s_glowReady = s_glowMatColor && s_glowMatHalo && s_glowMatBlurX && s_glowMatBlurY && s_glowBloom;
-	DebugLog("glow: level init %dx%d ok=%d rb1=%p rb2=%p color=%p halo=%p blurx=%p blury=%p bloom=%p",
+	DebugLog("glow: level init %dx%d ok=%d rb1=%p rb2=%p color=%p halo=%p blurx=%p blury=%p bloom=%d",
 		w, h, (int)s_glowReady, s_glowRB1, s_glowRB2, (void*)s_glowMatColor, (void*)s_glowMatHalo,
-		(void*)s_glowMatBlurX, (void*)s_glowMatBlurY, (void*)s_glowBloom);
+		(void*)s_glowMatBlurX, (void*)s_glowMatBlurY, (int)s_glowBloom);
 	if (!s_glowReady) GlowRelease();
 }
 
@@ -1481,7 +1473,7 @@ void Glow_Render()
 	const bool bMask = bOutline || bInner || bFullGlow;
 	const bool bHalo = g_glowEnable && !(bFullGlow && PlayerStencil_GlowLive());
 	GlowPasses_SEH(rc, w, h, iStencil, flBlur, bHalo, bMask ? GetMat(ChamsLayers::Flat, false) : nullptr,
-	                s_glowRB1, s_glowRB2, s_glowMatHalo, s_glowMatBlurX, s_glowMatBlurY, s_glowBloom);
+	                s_glowRB1, s_glowRB2, s_glowMatHalo, s_glowMatBlurX, s_glowMatBlurY);
 	if (bMask)
 		StencilSubmit(bOutline, bInner, bFullGlow);
 
@@ -1503,7 +1495,7 @@ void Glow_Render()
 // the same guard that keeps the live glow from re-chamsing a player 3x a frame.
 //
 // Same gates / halo-vs-full-res-glow choice as the live Glow_Render; radii x2 for the 2x target.
-void Glow_RenderPreview(void* pEnt, const float (*worldToProjection)[4], const void* pBones, int nBones, const void* pHdr)
+void Glow_RenderPreview(void* pEnt, void* pGun, const float (*worldToProjection)[4], const void* pBones, int nBones, const void* pHdr)
 {
 	if (!pEnt) return;
 	// live Glow_Render gates
@@ -1527,6 +1519,11 @@ void Glow_RenderPreview(void* pEnt, const float (*worldToProjection)[4], const v
 	GlowColor(g_glowVisColor, item.c, 0.f);   // at the origin: wave phase 0
 	item.c[3] *= GlowPulse();
 	s_glowItems.push_back(item);
+	if (pGun)   // live Glow_Render: the held weapon glows in its owner's colour
+	{
+		item.pEnt = reinterpret_cast<CBaseEntity*>(pGun);
+		s_glowItems.push_back(item);
+	}
 
 	// same iStencil/flBlur formula as the live pass above (g_glowLegacy / g_glowNormalBlend):
 	// pixel-space offsets already computed against w/h = the preview target's own (2x) size.
@@ -1538,7 +1535,7 @@ void Glow_RenderPreview(void* pEnt, const float (*worldToProjection)[4], const v
 	const bool bMask = bOutline || bInner || bFullGlow;
 	const bool bHalo = g_glowEnable && !(bFullGlow && PlayerStencil_GlowLive());
 	GlowPasses_SEH(rc, w, h, iStencil, flBlur, bHalo, bMask ? GetMat(ChamsLayers::Flat, false) : nullptr,
-	                s_previewRB1, s_previewRB2, s_previewMatHalo, s_previewMatBlurX, s_previewMatBlurY, s_previewBloom);
+	                s_previewRB1, s_previewRB2, s_previewMatHalo, s_previewMatBlurX, s_previewMatBlurY);
 
 	s_glowItems.swap(saved);
 
