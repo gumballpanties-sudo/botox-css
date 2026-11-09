@@ -24,20 +24,20 @@ inline constexpr const char* kPreAlignNames = "bottom\0top\0";
 
 inline constexpr float kIndScaleMin = 0.1f, kIndScaleMax = 4.f;
 
-// botox e_keybind_indicators, TF2 subset in botox order (no ladders, fireman, zeus, air freeze,
+// botox e_keybind_indicators, TF2 subset in botox order (no zeus, air freeze,
 // one hop, edge surf: none exist here). Bit i of g_kiShow = row i of "displayed keybinds".
 // New entries always go at the END, right before KI_COUNT -- bit i of g_kiShow is a
 // saved config value, so inserting mid-list would silently reassign everyone's saved toggles.
 enum KiToggle { KI_EB = 0, KI_PS, KI_EJ, KI_LJ, KI_DH, KI_MJ, KI_JB, KI_TB, KI_AS, KI_WC, KI_ST, KI_PSA,
-                KI_AC, KI_AB, KI_ES, KI_HSW, KI_PH, KI_COUNT };
+                KI_AC, KI_AB, KI_ES, KI_HSW, KI_PH, KI_FR, KI_COUNT };
 inline constexpr const char* kKiToggleNames[KI_COUNT] = {
     "edgebug", "pixelsurf", "edgejump", "longjump", "delayhop", "minijump", "jumpbug", "texturebug",
     "airstuck", "wallclimb", "autostrafe", "ps assist", "auto crouch", "auto bounce", "edge skip",
-    "half sideways", "pixelhop" };
+    "half sideways", "pixelhop", "fireman" };
 
 // botox e_keybind_labels, same subset, botox push order = draw order. { menu name, default label }
 enum KiLabel { LBL_EB = 0, LBL_PS, LBL_EJ, LBL_LJ, LBL_DH, LBL_MJ, LBL_JB, LBL_TB, LBL_AIR, LBL_WC, LBL_AS,
-               LBL_AST, LBL_AC, LBL_AB, LBL_ES, LBL_HSW, LBL_PH, LBL_COUNT };
+               LBL_AST, LBL_AC, LBL_AB, LBL_ES, LBL_HSW, LBL_PH, LBL_FR, LBL_COUNT };
 inline constexpr const char* kKiLabels[LBL_COUNT][2] = {
     { "edgebug", "eb" },     { "pixelsurf", "ps" },       { "edgejump", "ej" },     { "longjump", "lj" },
     { "delayhop", "dh" },    { "minijump", "mj" },        { "jumpbug", "jb" },      { "texturebug", "tb" },
@@ -45,6 +45,7 @@ inline constexpr const char* kKiLabels[LBL_COUNT][2] = {
     { "auto crouch", "ac" }, { "auto bounce", "ab" },
     { "edge skip", "es" },   { "half sideways", "hsw" },
     { "pixelhop", "ph" },
+    { "fireman", "fr" },    // CSS has ladders (11-09); botox draws it right after wc
 };
 
 // ---- shared ---------------------------------------------------------------------------------

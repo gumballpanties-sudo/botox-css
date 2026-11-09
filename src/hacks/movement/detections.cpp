@@ -3,6 +3,7 @@
 #include "jumpstats_core.h"
 #include "../aim/aim.h"
 #include "../hud/points.h"            // botox points_on_trick
+#include "fireman_pure.h"             // IsFlung: the CSS catch tick (grab + 270 fling, one tick)
 #include "../misc/misc_overlays.h"    // botox on_healthshot
 #include <cstdio>
 
@@ -97,7 +98,13 @@ void Detections_Tick(const DetTick& t)
     if (det(t.as, asOff, PTS_AIR_STUCK)) Print(DET_AS, "airstucked");
     if (det(t.ps && !t.as && !t.tb, psOff, PTS_PIXEL_SURF)) { Print(DET_PS, "pixelsurfed"); Healthshot_Trigger(2); }
     if (DetFresh(t.wc, wcOff)) { Print(DET_WC, "wallclimbed"); Points_OnTrick(PTS_WALL_CLIMB); }
-    // botox jump bug / head ceiling points (fireman needs a ladder, TF2 has none)
+    // botox jump bug / head ceiling / fireman points. botox fireman = a fall that STARTS a cmd on a
+    // ladder (that half lives at movement.cpp's ladder call site: ladder cmds never get here). CSS
+    // also flings on the catch tick itself (no ride): a fall whose vz jumps back up to a 270 shove
+    // counts too (airborne vz only rises when something assigned it)
+    if (prevOk && prevVz < -15.f && st.air && t.vz > prevVz + 1.f && t.vz < 100.f
+        && fireman::IsFlung(t.speed, 0.f, t.vz, t.gravity, t.interval))
+        Points_OnTrick(PTS_FIREMAN);
     if (prevOk && prevVz < 0.f && st.air && t.vz > 250.f) Points_OnTrick(PTS_JUMP_BUG);
     if (prevOk && prevVz > g * 2.f + 1.f && st.air && fabsf(t.vz + g) < 1.f) Points_OnTrick(PTS_HEAD_CEILING);
 }

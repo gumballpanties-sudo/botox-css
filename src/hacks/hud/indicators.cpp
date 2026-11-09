@@ -812,6 +812,7 @@ static int part_fired(const int id)
     case LBL_TB:   return trick(PTS_TEXTURE_BUG);
     case LBL_AIR:  return trick(PTS_AIR_STUCK);
     case LBL_WC:   return trick(PTS_WALL_CLIMB);
+    case LBL_FR:   return trick(PTS_FIREMAN);
     case LBL_ES:   return g_esFired.load();
     default:       return -1;
     }
@@ -1533,6 +1534,9 @@ static void keybind_indicators(const MvInd_t& s)
         add_hit(LBL_AIR, s.asHit, s.asOn);
     if (g_wallClimb && shown(KI_WC))
         add_hit(LBL_WC, s.wcHit, s.wcOn);
+    // botox: add_hit(label_fr, is_ladder, key) -- lit on our grab / ride / fling tick
+    if (g_fireMan && shown(KI_FR))
+        add_hit(LBL_FR, s.frHit, s.frOn);
     if (g_autoStrafe && shown(KI_ST))
         add(LBL_AS, s.strafeOn);
     if (g_psAssist && shown(KI_PSA))

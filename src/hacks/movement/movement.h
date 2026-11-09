@@ -235,6 +235,10 @@ extern bool g_fireMan;             extern int g_fireManKey;             extern i
 extern bool  g_firemanApproach;
 extern float g_firemanReach;
 extern bool  g_firemanCrouchJump;
+// botox popup "drop in" / "lock movement" / "sides only" (+ key), 11-09 port
+extern bool  g_firemanDropIn;
+extern bool  g_firemanDropInLock;
+extern bool  g_firemanSideOnly;    extern int g_firemanSideOnlyKey;    extern int g_firemanSideOnlyMode;
 extern bool g_fastLadder;          extern int g_fastLadderKey;          extern int g_fastLadderMode;
 extern bool g_ladderGlide;         extern int g_ladderGlideKey;         extern int g_ladderGlideMode;
 extern bool g_ladderFreelookClimb; extern int g_ladderFreelookClimbKey; extern int g_ladderFreelookClimbMode;

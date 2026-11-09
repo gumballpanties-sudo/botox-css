@@ -1734,6 +1734,7 @@ static bool s_airStuckReal = false;     // actually stuck (detections), set in A
 // jumpbug is a PRE-prediction feature and has to read the ride state too
 // indicator snapshot, written once per cmd at the end of Movement_RunImpl
 static MvInd_t s_mvInd{};
+static int s_detFallTick = -1000;   // START tick of the last airborne falling (vz < -15) walk cmd: fireman points
 
 // ---- Edge bug: the search, the replay and the overlay snapshot ----
 #include "edgebug.inl"
@@ -2415,6 +2416,15 @@ static void Movement_RunImpl(UserCmd_t* pCmd)
         LadderEdgeJump(pLocal, pCmd);   // last: sims the cmd the ladder features above wrote
     }
     LadderEdgeJumpWindow(pCmd);         // every cmd: its window runs after the ladder is gone
+    if (iLocalMove == MOVETYPE_LADDER)
+    {
+        // ladder ticks return below, before the indicator snapshot + detections: publish fireman's
+        // ride here, and botox's fireman points (prev cmd started airborne falling, this one on a ladder)
+        s_mvInd.frOn  = On(g_fireMan, g_fireManKey, g_fireManMode);
+        s_mvInd.frHit = s_firemanHit;
+        if (s_detFallTick == FmTick() - 1) Points_OnTrick(PTS_FIREMAN);
+        s_detFallTick = -1000;
+    }
     if (bMoveBlocked && !bCalcOn) return;
 
     DistCalc(pLocal, pCmd);   // measuring tool, not a movement feature -- runs even bMoveBlocked
@@ -2757,6 +2767,7 @@ static void Movement_RunImpl(UserCmd_t* pCmd)
         d.tb = s_textureBugHit; d.as = s_airStuckReal; d.ps = s.psHit; d.wc = s_wcLanded;
         d.tbOwns = s_tbOwnsCmd;
         Detections_Tick(d);
+        s_detFallTick = (!d.onGround && d.walk && d.vz < -15.f) ? d.tick : -1000;
         // botox get_trick_states: eb queued / tb / as / wc / ps now void the jump
         JumpstatsTick(pCmd, s_ebDetected || s_textureBugHit || s_airStuckHit || s_airStuckReal
                             || s_wcLanded || s.psHit);

@@ -132,6 +132,74 @@ inline void LadderVel(float pitch, float yaw, float fwdSpeed, float rightSpeed,
     vz = lat[2] - normal * tmp[2];
 }
 
+// ---- sides only (botox fireman.cpp fireman_side_*, 2026-09-25..10-05) ----
+// A side = the ladder brush's narrow face beside the wide front. Frame: s = side normal (out),
+// u = along the side toward its FRONT end, half = half the side's depth, point = side's middle.
+
+// botox fireman_side_targets' per-side input: one end of a face, walked along it (fireman_face_end)
+struct FaceEnd { bool found = false, open = false; float at = 0.f, px = 0.f, py = 0.f, pz = 0.f, nx = 0.f, ny = 0.f; };
+struct SideTarget { float px = 0.f, py = 0.f, pz = 0.f, nx = 0.f, ny = 0.f, ux = 0.f, uy = 0.f, half = 0.f; bool walled = false; };
+
+// botox fireman_side_geometry 1:1. ends[0] walked along +tangent (-ny, nx), ends[1] along -tangent.
+// front (fx, fy) given = the end whose normal faces it is the front end; none = the open end is.
+inline bool SideGeometry(float px, float py, float pz, float nx, float ny, const FaceEnd ends[2],
+                         const float* front, SideTarget& out)
+{
+    if (!ends[0].found || !ends[1].found) return false;
+    int fe = 0;
+    if (front)
+        fe = ends[0].nx * front[0] + ends[0].ny * front[1] >= ends[1].nx * front[0] + ends[1].ny * front[1] ? 0 : 1;
+    else if (ends[0].open != ends[1].open)
+        fe = ends[0].open ? 0 : 1;
+    else
+        return false;
+    const float tx = -ny, ty = nx;
+    const float fs = fe == 0 ? 1.f : -1.f;
+    const float frontAt = fs * ends[fe].at, backAt = -fs * ends[1 - fe].at;
+    const float mid = (frontAt + backAt) * 0.5f;
+    out.px = px + tx * mid; out.py = py + ty * mid; out.pz = pz;
+    out.nx = nx; out.ny = ny;
+    out.ux = tx * fs; out.uy = ty * fs;
+    out.half = std::fabs(frontAt - backAt) * 0.5f;
+    out.walled = !ends[1 - fe].open;
+    return out.half > 0.25f;
+}
+
+// botox fireman_side_park 1:1: `gap` off the side plane, the hull's back edge `back` short of the
+// ladder's back plane. Staged = still in front of the front face and across the ladder: park 2u
+// past the front end first (a straight line there touches / latches the front face).
+inline void SidePark(float ox, float oy, float px, float py, float sx, float sy, float ux, float uy,
+                     float half, float gap, float back, float hullX, float& outX, float& outY, bool& staged)
+{
+    const float supS = hullX * (std::fabs(sx) + std::fabs(sy)), supU = hullX * (std::fabs(ux) + std::fabs(uy));
+    const float sRel = (ox - px) * sx + (oy - py) * sy, uRel = (ox - px) * ux + (oy - py) * uy;
+    staged = uRel - supU >= half - 0.25f && sRel - supS < 0.25f;
+    const float uWant = staged ? half + supU + 2.f : -half + 0.5f + supU - back;
+    outX = px + sx * (supS + gap) + ux * uWant;
+    outY = py + sy * (supS + gap) + uy * uWant;
+}
+
+// botox fireman_side_line_clear 1:1: the straight line origin -> park is already past the side
+// plane by `margin` where it crosses the front plane (skip the staged waypoint)
+inline bool SideLineClear(float ox, float oy, float parkX, float parkY, float px, float py, float sx, float sy,
+                          float ux, float uy, float half, float hullX, float margin)
+{
+    const float supS = hullX * (std::fabs(sx) + std::fabs(sy)), supU = hullX * (std::fabs(ux) + std::fabs(uy));
+    const float s0 = (ox - px) * sx + (oy - py) * sy, u0 = (ox - px) * ux + (oy - py) * uy;
+    const float s1 = (parkX - px) * sx + (parkY - py) * sy, u1 = (parkX - px) * ux + (parkY - py) * uy;
+    if (u0 - u1 <= 1e-6f) return s0 - supS >= margin;
+    float t = (u0 - (half + supU)) / (u0 - u1);
+    t = t < 0.f ? 0.f : (t > 1.f ? 1.f : t);
+    return s0 + (s1 - s0) * t - supS >= margin;
+}
+
+// botox side_ok: a grab / fling only counts when its face is the picked side (dot > 0.9)
+inline bool SideOk(float nx, float ny, float sx, float sy)
+{
+    const float l = std::sqrt(nx * nx + ny * ny);
+    return l > 0.01f && (nx * sx + ny * sy) / l > 0.9f;
+}
+
 // Fastest descent while attached: IN_FORWARD + IN_MOVERIGHT, pitch 89 (down), yaw so the right
 // vector points along the face normal. V = 200*fwd + 200*right -> into-face part flips to -up:
 // vz = -(200 sin89 + 200) ~ -400, 2x IN_BACK's 200. Yaw is 89 deg off the normal, not 90: that

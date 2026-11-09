@@ -432,7 +432,14 @@ static void Page_MovementMain()
                 ImGui::Keybind("fire man key", &g_fireManKey, &g_fireManMode);
                 ImGui::Checkbox("approach##fireman", &g_firemanApproach);
                 SliderF("reach##fireman", &g_firemanReach, 64.f, 640.f, "%.0f u");
+                ImGui::Checkbox("drop in##fireman", &g_firemanDropIn);
+                // stops stray keys strafing you out of the shaft; eats fwd/side/duck, never jump
+                if (g_firemanDropIn)
+                    ImGui::Checkbox("lock movement##fireman", &g_firemanDropInLock);
                 ImGui::Checkbox("crouch jump##fireman", &g_firemanCrouchJump);
+                ImGui::Checkbox("sides only##fireman", &g_firemanSideOnly);
+                if (g_firemanSideOnly)
+                    ImGui::Keybind("sides only key", &g_firemanSideOnlyKey, &g_firemanSideOnlyMode);
             }, ImVec2(220.f, -1));
     }
     menu_group_end();
