@@ -29,8 +29,28 @@
 void DebugLog(const char* fmt, ...);   // dllmain.cpp
 extern void* g_matSystem;               // IMaterialSystem (thread.cpp)
 extern void* g_modelRender;             // IVModelRender
+extern IDirect3DDevice9* g_d3dDev;      // globals.h (not included here: drags dih's SDK in)
 
 bool g_espPreviewDrawing = false;
+
+namespace
+{
+	// ImGui's dx9 backend blends with texture alpha x vertex alpha. In a map the engine writes depth (or
+	// whatever the pass left) into the target's alpha -- the depth-to-dest-alpha switch in Render() does not
+	// cover every pass -- and the body came out see-through. Take alpha from the vertex alone for the image.
+	void ImageAlphaOpaque(const ImDrawList*, const ImDrawCmd*)
+	{
+		if (!g_d3dDev) return;
+		g_d3dDev->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_SELECTARG1);
+		g_d3dDev->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_DIFFUSE);
+	}
+	void ImageAlphaRestore(const ImDrawList*, const ImDrawCmd*)
+	{
+		if (!g_d3dDev) return;   // imgui_impl_dx9.cpp SetupRenderState values
+		g_d3dDev->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_MODULATE);
+		g_d3dDev->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
+	}
+}
 
 namespace
 {
@@ -702,7 +722,11 @@ void EspPreview::DrawBody()
 	dl->AddRectFilled(pos, end, background, rounding);
 
 	if (void* tex = EspPreview::Texture())
+	{
+		dl->AddCallback(ImageAlphaOpaque, nullptr);
 		dl->AddImageRounded((ImTextureID)tex, pos, end, ImVec2(0.f, 0.f), ImVec2(1.f, 1.f), IM_COL32_WHITE, rounding);
+		dl->AddCallback(ImageAlphaRestore, nullptr);
+	}
 	else
 	{
 		const char* text = s_failed ? "preview unavailable" : "loading";
