@@ -1067,3 +1067,15 @@ void WeaponSheen_End()
 	if (!ScreenFx_QueueFunctor(&s_sheenDisarmFn))
 		Fn_SheenDisarm(&s_sheenDisarmFn);
 }
+
+// render thread, before Reset / eject: masks + cubes are DEFAULT-pool. CPU vtf assets stay
+// (s_sheenState 2), so SheenGpuReady rebuilds on the next sheen draw; defs cleared or it appends twice.
+void WeaponSheen_Destroy()
+{
+	for (auto*& v : s_sheenVs) if (v) { v->Release(); v = nullptr; }
+	if (s_sheenPs) { s_sheenPs->Release(); s_sheenPs = nullptr; }
+	for (auto* t : s_sheenMasks) if (t) t->Release();
+	s_sheenMasks.clear();
+	for (auto*& c : s_sheenCubes) if (c) { c->Release(); c = nullptr; }
+	s_sheenVsDefs.clear(); s_sheenPsDefs.clear();
+}

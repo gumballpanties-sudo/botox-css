@@ -44,7 +44,9 @@ static int     s_wcWallTick  = -100000; /* last tick a disp face was engaged (th
 static float   s_wcScanStart = 0.f;
 static float   s_wcGroundZ   = -1e9f;   /* z of the last ground tick: viz "+h", LandOk's rise */
 /* the committed depth-d win: replayed while the re-search misses, so tick 1 of a plan is never sent alone */
-static struct { Vec3 wish; float fwd = 0.f, yo = 0.f; int buttons = 0; int left = 0; } s_wcPlan;
+/* face + faceZ (START z it was scanned at) + disp: the scan misses a ledge the hull now hangs above (11-10 log: brush
+   d=6 duck wins up=34..62, the air duck lifts the feet over the lip, 12x PLAN LOST at=scan) -- the plan judges on it */
+static struct { Vec3 wish; float fwd = 0.f, yo = 0.f; int buttons = 0; int left = 0; GameTrace_t face{}; float faceZ = 0.f; bool disp = false; } s_wcPlan;
 static int s_wcGroundCmd = 0;   /* command_number of the last ground START (steer job: first air tick = +1) */
 /* steer to seam job (botox m_steer): START of the first air tick in slot k_steer_slot, every along target rolled over the
    first k_steer_delay ticks, the best one steered from then on */
@@ -62,7 +64,7 @@ static struct WcSteer {
 } s_wcSteer;
 
 /* per-second counters, debug log */
-static int s_wcN[29]{}; /* ticks scan disp near sweep win hop strip wall rej d1 d2 d3 d4 plan zmiss dup cut | steer: job pick tick drift done | pin: try land | brush: face low win | pre */
+static int s_wcN[30]{}; /* ticks scan disp near sweep win hop strip wall rej d1 d2 d3 d4 plan zmiss dup cut | steer: job pick tick drift done | pin: try land | brush: face low win | pre | keep (scan missed, plan's face used) */
 static int s_wcDep[wc::k_depth]{};   /* wins per depth */
 static Vec3 s_wcBrushN{};  /* last brush face the disp gate skipped (log bn=) */
 static int s_wcSims = 0; static long long s_wcUs = 0ll, s_wcUsWorst = 0ll;
@@ -117,9 +119,9 @@ static void WallClimb(void* pLocal, UserCmd_t* pCmd)
     if (const unsigned long long now = GetTickCount64(); g_debugLogEnable && now >= s_wcLogNext) {
         s_wcLogNext = now + 1000ull;
         if (s_wcN[0])
-            DebugLog("WC: ticks=%d scan=%d wall=%d disp=%d near=%d sweep=%d win=%d hop=%d strip=%d rej=%d dep=%d/%d/%d/%d/%d/%d plan=%d zmiss=%d pre=%d dup=%d cut=%d steer=%d/%d/%d/%d/%d pin=%d/%d brush=%d/%d low=%d sims=%d us=%lld worst=%lld bn=%.2f,%.2f,%.2f",
+            DebugLog("WC: ticks=%d scan=%d wall=%d disp=%d near=%d sweep=%d win=%d hop=%d strip=%d rej=%d dep=%d/%d/%d/%d/%d/%d plan=%d keep=%d zmiss=%d pre=%d dup=%d cut=%d steer=%d/%d/%d/%d/%d pin=%d/%d brush=%d/%d low=%d sims=%d us=%lld worst=%lld bn=%.2f,%.2f,%.2f",
                      s_wcN[0], s_wcN[1], s_wcN[8], s_wcN[2], s_wcN[3], s_wcN[4], s_wcN[5], s_wcN[6], s_wcN[7], s_wcN[9],
-                     s_wcDep[0], s_wcDep[1], s_wcDep[2], s_wcDep[3], s_wcDep[4], s_wcDep[5], s_wcN[14], s_wcN[15], s_wcN[28], s_wcN[16], s_wcN[17],
+                     s_wcDep[0], s_wcDep[1], s_wcDep[2], s_wcDep[3], s_wcDep[4], s_wcDep[5], s_wcN[14], s_wcN[29], s_wcN[15], s_wcN[28], s_wcN[16], s_wcN[17],
                      s_wcN[18], s_wcN[22], s_wcN[19], s_wcN[20], s_wcN[21], s_wcN[23], s_wcN[24], s_wcN[25], s_wcN[27], s_wcN[26],
                      s_wcSims, s_wcUs, s_wcUsWorst, s_wcBrushN.x, s_wcBrushN.y, s_wcBrushN.z);
         for (int& c : s_wcN) c = 0;
@@ -175,7 +177,11 @@ static void WallClimb(void* pLocal, UserCmd_t* pCmd)
     const char* plan_why = "miss";
     struct PlanLost {
         const int& in; const char* const& why; const bool& post;
-        ~PlanLost() { if (in > 0 && !s_wcLanded && !post) DebugLog("WC PLAN LOST: left=%d at=%s", in, why); }
+        ~PlanLost() {
+            if (in <= 0 || s_wcLanded || post) return;
+            DebugLog("WC PLAN LOST: left=%d at=%s", in, why);
+            s_wcPlan.left = 0;   // dead: next tick searches fresh (it re-logged left=5 every tick to the ground)
+        }
     } plan_lost{ plan_in, plan_why, bGroundPost };
 
     // yields. TB / HS / HB catches, AS pins (AS outranks WC, coldtires order), a running tb ride, EB's cmd, every PS owner:
@@ -465,7 +471,13 @@ static void WallClimb(void* pLocal, UserCmd_t* pCmd)
     }
 
     plan_why = "scan";
-    if (!scan_disp()) return;
+    if (!scan_disp()) {
+        if (s_wcPlan.left <= 0) return;
+        primary = s_wcPlan.face;   // the plan's face, moved with the hull (judge measures at the contact's z)
+        primary.endpos.z += start_pos.z - s_wcPlan.faceZ;
+        face_disp = s_wcPlan.disp;
+        ++s_wcN[29];
+    }
     // brush: a win must land above the last ground + 2. Falling past that = no win exists, no sims (dust2 = every wall)
     plan_why = "low";
     if (!face_disp && !BrushReach(start_pos.z, velocity.z, s_wcGroundZ, CvarFloat("sv_gravity", 800.f))) { ++s_wcN[26]; return; }
@@ -668,6 +680,9 @@ static void WallClimb(void* pLocal, UserCmd_t* pCmd)
         s_wcPlan.buttons = best.buttons & (IN_DUCK | IN_JUMP);
         s_wcPlan.yo      = best_yo;
         s_wcPlan.left    = found_depth - 1;
+        s_wcPlan.face    = primary;
+        s_wcPlan.faceZ   = start_pos.z;
+        s_wcPlan.disp    = face_disp;
     }
 
     if (found) {

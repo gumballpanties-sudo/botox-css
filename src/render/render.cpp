@@ -2545,8 +2545,10 @@ HRESULT __stdcall h_Reset(IDirect3DDevice9* dev, D3DPRESENT_PARAMETERS* pp) {
     Avatar_ReleaseAll();               // unit E5: avatar textures are DEFAULT-pool too
     PlayerStencil_ReleaseTargets();    // esp unit: player stencil mask/blur targets, DEFAULT-pool
     EspPreview::DropTexture();         // esp preview: its target is remade, the d3d texture with it
+    EspWeaponIcon_ReleaseAll();        // esp weapon glyphs: DEFAULT-pool, a live one fails the Reset; recached on next draw
     GifTex_ReleaseAll();               // unit E5: gif frame texture, GDI+ bitmap survives the reset
     SpectatorList_ReleaseTextures();   // spec unit: eyes style row textures, DEFAULT-pool
+    ResSpoof::OnDeviceLost();          // resolution spoofer: overlay/copy/crunch targets, all DEFAULT-pool
     BlurRect_Destroy();                // unit E5: blur scratch targets + shader
     Web_InvalidateTexture();
     if (g_imguiInit) ImGui_ImplDX9_InvalidateDeviceObjects();

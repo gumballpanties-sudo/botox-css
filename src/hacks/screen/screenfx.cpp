@@ -8,6 +8,7 @@
 #include "shaders/fx_quad_vs.h"   // k_fxQuadVsBytes   -- compiled from fx_quad_vs.hlsl by fxc
 #include "../visuals/reflections.h"  // unit D3: Reflections_Draw -- same depth source, same draw point
 #include "../visuals/mc_world.h"      // unit D3: MCWorld_UpdateView -- cloud drift off this view setup
+#include "../visuals/lsd_chams.h"     // WeaponSheen_Destroy in ScreenFx_Destroy
 #include "screenfx_passes.h" // ScreenFxPasses_DepthView -- emphasize/show depth, same draw point
 #include "../web/websurface.h"  // Web_OnPostScreenSpaceEffects -- botox do_post_screen_space_effects.cpp:49
 
@@ -412,6 +413,7 @@ void ScreenFx_Destroy()
     FrameBlend_Destroy();
     Reflections_Destroy();   // DEFAULT-pool scene copy: a live one fails the Reset
     MCWorld_Destroy();       // cloud/sun textures may be DEFAULT-pool on a d3d9ex device
+    WeaponSheen_Destroy();   // sheen mask frames + cubemaps, DEFAULT-pool
 
     if (s_preResolve){ s_preResolve->Release();s_preResolve= nullptr; }
     if (s_preSurf)   { s_preSurf->Release();   s_preSurf   = nullptr; }

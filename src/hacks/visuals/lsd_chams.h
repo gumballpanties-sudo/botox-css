@@ -32,3 +32,4 @@ void TwoToneChams_End();
 // implementation (aim/chams.cpp, needs the typed KeyValues/CreateMaterial this TU can't include).
 bool WeaponSheen_Begin(const char* modelName);
 void WeaponSheen_End();
+void WeaponSheen_Destroy();   // render thread, before Reset / eject (screenfx.cpp ScreenFx_Destroy)

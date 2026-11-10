@@ -120,6 +120,9 @@ void Avatar_Pump()
     if (!pfnSmall || !pfnMedium || !pfnReqInfo || !pfnImgSize || !pfnImgRGBA) return;
 
     const unsigned long long now = GetTickCount64();
+    // one entry per steamid ever seen; expired ones never block a retry, so dropping them changes nothing
+    if (s_nextTry.size() > 256)
+        std::erase_if(s_nextTry, [now](const auto& kv) { return kv.second <= now; });
 
     for (const WantedFetch& w : wanted)
     {
