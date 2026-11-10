@@ -419,12 +419,12 @@ static void Page_MiscMain()
         if (g_dpEnable)
             ImGui::OptionPopup("death particles settings", []() {
                 ImGui::Combo("effect##deathparticles", &g_dpStyle,
-                    "blood burst\0sparks\0confetti\0smoke puff\0explosion\0soul\0bouncy balls\0melt\0minecraft\0");
+                    "blood burst\0sparks\0confetti\0smoke puff\0explosion\0soul\0bouncy balls\0melt\0minecraft\0hl2 dissolve\0");
 
                 const int type = g_dpStyle;
                 // melt (7) still falls back to blood (killeffects.cpp), goo/speed rows would be
                 // dead UI -- not ported, see report N/A
-                if ((type < 5 && type != 3) || type == 7) return;
+                if ((type < 5 && type != 3) || type == 7 || type == 9) return;
 
                 if (type == 8)
                     ImGui::Combo("drops##deathparticles", &g_dpMcMode, "only x\0both x and xp\0only xp\0");

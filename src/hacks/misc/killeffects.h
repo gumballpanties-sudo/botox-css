@@ -27,12 +27,14 @@
 //                   is not a safe single-session change -- falls back to blood.
 //   8 mc         -> minecraft crit x's + xp orbs (botox sprites), player hull as the OBB
 //                   (CS:S hull dims via aim/css.h once SDK unit publishes it)
+//   9 dissolve   -> the game's own hl2 DissolveEffect on the victim's ragdoll (KillEffects_FrameStart)
 // 11-01: step / alpha / glow / stars / sprite shapes = botox kill_effects_paint 1:1, radii projected
 // from world units; model colors = one back buffer read (killeffects_world.cpp CaptureColors).
 // Body points stay botox's no-bones fallback (8 points up the victim), the visibility trace runs
 // at spawn on the game thread.
 void KillEffects_OnDeath(int victimIdx, int attackerIdx, bool localDied);
 void RenderKillEffects();   // ticks + draws the custom (non-engine) particle styles
+void KillEffects_FrameStart();   // FSN FRAME_RENDER_START: hl2 dissolve on ragdolls
 
 // Round 2 lua port (fx.particle/fx.sparks): exported wrappers around the same
 // DispatchEngineParticle/FxSparks this file already calls for the "blood"/"sparks" death

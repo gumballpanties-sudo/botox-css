@@ -9,6 +9,7 @@
 #include "../hacks/web/websurface.h"      // Web_MainTick -- FSN stage 0, main menu too
 #include "../hacks/botoxnet/botoxnet.h"   // g_botox_net.on_frame_stage_notify (includes aim/css_bridge.h, legal outside aim)
 #include "../hacks/lua/lua.h"             // g_lua.on_frame_stage -- botox frame_stage_notify.cpp:35
+#include "../hacks/misc/killeffects.h"    // KillEffects_FrameStart -- hl2 dissolve
 
 // Engine FrameStageNotify, shared by several units (MinHook allows only one hook per target).
 // Used to live in hacks/visuals/skins.cpp (claimed the hook first); moved here unchanged when
@@ -36,6 +37,7 @@ static void __fastcall h_FrameStageNotify(int stage)
 
     if (!g_engine || !g_entityList) return;
     g_botox_net.on_frame_stage_notify(stage);   // botox :69, in-game part only
+    if (stage == 5 && IsInGame()) KillEffects_FrameStart();   // hl2 dissolve: DissolveEffect makes a client entity, game thread only
 
     // 11-03 join crash: local m_ModelName (+0x218, C_BaseEntity::GetModelName in the live
     // client.dll) gets a handle-looking value -- watch it, crash.log names the writer.

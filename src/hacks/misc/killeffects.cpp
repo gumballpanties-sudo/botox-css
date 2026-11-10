@@ -1,7 +1,9 @@
 #include "killeffects.h"
 #include "../movement/movement.h"     // Vec3
 #include "../movement/prediction.h"   // EntV3
+#include "unitE_logic.h"              // n_unitE::DecodeEHandleIndex
 #include <cstdint>
+#include <vector>
 
 // ==== engine particle dispatch (blood / confetti / explosion) =====================
 // x64 TF2 client.dll sigs, originally verified in the x64 TF2 SDK 
@@ -184,6 +186,95 @@ void KfxPush_Smoke(const Vec3& feet);
 void KfxPush_Balls(const Vec3& feet);
 void KfxPush_Mc(const Vec3& feet, const Vec3& obbMins, const Vec3& obbMaxs);
 
+// ==== hl2 dissolve (botox kill_effects.cpp hl2_dissolve_paint) =====================
+// The game's own DissolveEffect (sdk ragdoll_shared.cpp:1096, client_base = in every 2013 client)
+// on the victim's ragdoll. x64 client.dll: target rcx, time xmm1. Sig = the standalone copy found
+// from its "sprites/blueglow1.vmt" xref (the other xref is TransferDissolveFrom, inlined); unique
+// in css + tf2 client.dll, only the alloc size differs.
+namespace
+{
+    using DissolveEffect_t = void*(__fastcall*)(void*, float);
+    struct DissolveWait { int victim; float since; };
+    std::vector<DissolveWait> s_dissolveWait;
+
+    DissolveEffect_t DissolveFn()
+    {
+        static DissolveEffect_t fn = nullptr;
+        static bool tried = false;
+        if (!tried) {
+            tried = true;
+            if (HMODULE hClient = GetModuleHandleA("client.dll"))
+                fn = reinterpret_cast<DissolveEffect_t>(PatternScan(hClient,
+                    "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 30 48 8B F1 0F 29 74 24 20 B9 ? ? 00 00 0F 28 F1 E8"));
+            DebugLog("KFX: DissolveEffect %p", (void*)fn);
+        }
+        return fn;
+    }
+
+    // DSV: last look per wait, printed when it times out
+    struct DissolveSeen { unsigned hRagdoll; void* ragdoll; unsigned hPlayer; void* victim; };
+    DissolveSeen s_dissolveSeen{};
+
+    // true = done with this victim (dissolved or gone), false = ragdoll not here yet.
+    // Ragdoll = victim's m_hRagdoll whose m_hPlayer is the victim (botox melt_ragdoll).
+    bool TryDissolve(int victimIdx, float cur)
+    {
+        // 0 = tables not up yet, -1 = not in this build
+        const auto resolve = [](int& off, const char* table, const char* name) {
+            if (off != 0) return;
+            if (RecvTable* t = FindNetworkTable(table)) { const int o = FindPropOffset(t, name); off = o > 0 ? o : -1; }
+        };
+        static int offRagdoll = 0, offRagPlayer = 0;
+        resolve(offRagdoll, "DT_CSPlayer", "m_hRagdoll");
+        resolve(offRagPlayer, "DT_CSRagdoll", "m_hPlayer");
+        const DissolveEffect_t fn = DissolveFn();
+        if (!fn || offRagdoll < 0 || offRagPlayer < 0) {
+            DebugLog("DSV: off fn=%p offRagdoll=%d offRagPlayer=%d", (void*)fn, offRagdoll, offRagPlayer);
+            return true;
+        }
+        if (offRagdoll == 0 || offRagPlayer == 0) return false;
+
+        __try {
+            void* victim = GetClientEntity(victimIdx);
+            s_dissolveSeen = { 0xFFFFFFFFu, nullptr, 0xFFFFFFFFu, victim };
+            if (!victim) { DebugLog("DSV: victim %d gone", victimIdx); return true; }
+            const auto handleAt = [](void* ent, int off) { return *reinterpret_cast<unsigned*>(reinterpret_cast<uintptr_t>(ent) + off); };
+            // index -> GetClientEntity: the raw handle into slot 4 returned null every time (tf2 DSV 11-10)
+            const unsigned hRagdoll = handleAt(victim, offRagdoll);
+            const int ragIdx = n_unitE::DecodeEHandleIndex(hRagdoll);
+            void* ragdoll = ragIdx > 0 ? GetClientEntity(ragIdx) : nullptr;
+            s_dissolveSeen.hRagdoll = hRagdoll;
+            s_dissolveSeen.ragdoll  = ragdoll;
+            if (!ragdoll) return false;
+            const unsigned hPlayer = handleAt(ragdoll, offRagPlayer);
+            s_dissolveSeen.hPlayer = hPlayer;
+            if (n_unitE::DecodeEHandleIndex(hPlayer) != victimIdx) return false;
+            void* made = fn(ragdoll, cur);
+            DebugLog("DSV: start victim=%d rag=%p made=%p offs=%d/%d", victimIdx, ragdoll, made, offRagdoll, offRagPlayer);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) { DebugLog("DSV: exception victim=%d code=0x%X", victimIdx, GetExceptionCode()); }
+        return true;
+    }
+}
+
+// FSN FRAME_RENDER_START, game thread: DissolveEffect makes a client entity
+void KillEffects_FrameStart()
+{
+    if (!g_dpEnable || g_dpStyle != 9 || g_eject || !g_globalVars || !g_entityList) { s_dissolveWait.clear(); return; }
+    const float cur = g_globalVars->curtime;
+    for (size_t i = 0; i < s_dissolveWait.size();) {
+        const DissolveWait w = s_dissolveWait[i];
+        const bool timedOut = cur < w.since || cur - w.since > 1.f;
+        if (timedOut)
+            DebugLog("DSV: timeout victim=%d victimPtr=%p hRagdoll=0x%X rag=%p hPlayer=0x%X", w.victim, s_dissolveSeen.victim,
+                     s_dissolveSeen.hRagdoll, s_dissolveSeen.ragdoll, s_dissolveSeen.hPlayer);
+        if (timedOut || TryDissolve(w.victim, cur))
+            s_dissolveWait.erase(s_dissolveWait.begin() + i);
+        else
+            ++i;
+    }
+}
+
 void KillEffects_OnDeath(int victimIdx, int attackerIdx, bool localDied)
 {
     if (!g_dpEnable || localDied) return;   // botox: never on the local player's own death
@@ -216,6 +307,10 @@ void KillEffects_OnDeath(int victimIdx, int attackerIdx, bool localDied)
     case 3: KfxPush_Smoke(feet); return;
     case 5: KfxPush_Soul(feet);  return;
     case 8: KfxPush_Mc(feet, Vec3(-16.f, -16.f, 0.f), Vec3(16.f, 16.f, 62.f)); return;   // CS:S player hull (g_CSViewVectors, cs_gamerules.cpp:75-76: hull min/max)
+    case 9:   // ragdoll comes a frame or two later
+        if (g_globalVars) s_dissolveWait.push_back({ victimIdx, g_globalVars->curtime });
+        DebugLog("DSV: queued victim=%d globals=%p", victimIdx, (void*)g_globalVars);
+        return;
     case 6:
         if (attackerIdx == localIdx) KfxPush_Balls(feet);   // botox: attacker-is-local gate
         return;

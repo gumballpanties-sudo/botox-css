@@ -5,6 +5,7 @@
 #include "../movement/prediction.h"    // g_globalVars
 #include "../../render/render.h"       // W2S_Project
 #include "../screen/screenfx.h"        // ScreenFx_FindClientMode -- GetViewModelFOV vtable swap
+#include "../misc/unitE_logic.h"       // n_unitE::DecodeEHandleIndex
 #include <mutex>
 #include <deque>
 #include <unordered_map>
@@ -782,7 +783,9 @@ static void __cdecl RagdollForceProxy(const void* data, void* structure, void* o
     if (mode > 0 && data && structure && s_offRagPlayer > 0 && !g_eject) {
         __try {
             const unsigned handle = *reinterpret_cast<unsigned*>(reinterpret_cast<uintptr_t>(structure) + s_offRagPlayer);
-            void* player = g_entityList ? VCall<void*>(g_entityList, 4, handle) : nullptr;   // GetClientEntityFromHandle
+            // index -> GetClientEntity: the raw handle into slot 4 returns null (tf2 killeffects DSV 11-10)
+            const int playerIdx = n_unitE::DecodeEHandleIndex(handle);
+            void* player = playerIdx > 0 ? GetClientEntity(playerIdx) : nullptr;
             const int localIdx = GetLocalPlayerIndex();
             void* local = localIdx > 0 ? GetClientEntity(localIdx) : nullptr;
             if (player && local && player != local && ReadInt(player, g_offTeamNum) != ReadInt(local, g_offTeamNum))
