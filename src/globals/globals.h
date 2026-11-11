@@ -649,6 +649,7 @@ extern int   g_edgeBugPaths;         // plans kept per search when steering (1-8
 extern int   g_edgeBugLockType;      // 0 smooth / 1 full
 extern float g_edgeBugLockStrength;  // 0-100 %
 extern int   g_edgeBugStance;        // botox m_edgebug_types: bit 0 ducked, bit 1 standing, 0 = both
+extern bool  g_edgeBugCurStance;     // duck held -> ducked only, else standing only (all styles)
 extern int   g_edgeBugDelTicks;     extern bool g_edgeBugDelAdvanced; extern float g_edgeBugDelAngleLimit;
 extern int   g_edgeBugDelSearch;    extern bool g_edgeBugDelSilent;   extern bool  g_edgeBugDelMouseFix;
 extern float g_edgeBugDnaScan;      extern bool g_edgeBugDnaAdvanced; extern int   g_edgeBugDnaRange;

@@ -188,12 +188,15 @@ static void Page_MovementMain()
                     if (g_edgeBugHwAdvanced)
                         SliderF("max strafe delta##ebhwdelta", &g_edgeBugHwStrafeDeltaMax, 0.1f, 100.f, "%.1f%%");
                 }
+                // standing -> standing ebs only, holding duck -> ducked ebs only
+                ImGui::Checkbox("current stance only##ebcurstance", &g_edgeBugCurStance);
                 if (style == 0)
                 {
                     SliderF("edge bug predict time", &g_edgeBugPredictTime, 0.02f, 2.f, "%.2f s");
                     // none picked = both
                     static const char* const kEbTypes[] = { "ducked", "standing" };
-                    ImGui::MultiCombo("stance##ebtypes", &g_edgeBugStance, kEbTypes, 2);
+                    if (!g_edgeBugCurStance)
+                        ImGui::MultiCombo("stance##ebtypes", &g_edgeBugStance, kEbTypes, 2);
                     ImGui::Checkbox("autostrafe to edge", &g_edgeBugToEdge);
                     if (g_edgeBugToEdge)
                     {

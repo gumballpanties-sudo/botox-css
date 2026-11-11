@@ -448,6 +448,7 @@ static const CfgEntry kEntries[] = {
     { "edgeBugDetectMode",  CfgEntry::INT,   &g_edgeBugDetectMode, 0 },
     { "edgeBugMaxBend", CfgEntry::FLOAT, &g_edgeBugStrafeAngleMax, 0 },
     { "edgeBugStance",    CfgEntry::INT,    &g_edgeBugStance, 0 },
+    { "edgeBugCurStance", CfgEntry::BOOL,   &g_edgeBugCurStance, 0 },
     { "edgeBugToEdge",    CfgEntry::BOOL,   &g_edgeBugToEdge, 0 },
     { "edgeBugMouseSteer",CfgEntry::BOOL,   &g_edgeBugMouseSteer, 0 },
     { "edgeBugPaths",     CfgEntry::INT,    &g_edgeBugPaths, 0 },

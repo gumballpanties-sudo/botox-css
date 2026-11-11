@@ -590,6 +590,7 @@ int   g_edgeBugLockType = 1;          // botox: smooth / full (donor: static / f
 float g_edgeBugLockStrength = 100.f;
 // botox m_edgebug_types bitmask: bit 0 ducked, bit 1 standing, 0 = both (old 0/1/2 read the same)
 int   g_edgeBugStance = 0;
+bool  g_edgeBugCurStance = false;     // only the stance the duck key is in now (overrides stance)
 // donor styles (botox m_edgebug_del_* / m_edgebug_dna_*)
 int   g_edgeBugDelTicks = 64;
 bool  g_edgeBugDelAdvanced = false;

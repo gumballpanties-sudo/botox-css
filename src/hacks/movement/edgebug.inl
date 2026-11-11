@@ -618,8 +618,10 @@ static void EbDonorPost(void* pLocal, UserCmd_t* pCmd, int style)
                     || (del ? (vel.z > 0.f || vel.Length2D() == 0.f) : (endVel.z > 0.f || s_prePredVel.z > 0.f))) break;
                 if (pathN <= k_ebMaxTicks) path[pathN++] = EntV3(pLocal, g_offOrigin);
                 bool br = false;
+                const bool duckedNow = (EntI(pLocal, g_offFlags) & FL_DUCKING) != 0;
                 if (EbDonorCheck(pLocal, &c, br, grav, shift))
                 {
+                    if (g_edgeBugCurStance && duckedNow != ((s_ebUserButtons & IN_DUCK) != 0)) break;
                     EbDonor_t& d = s_ebDonor;
                     d.ticksLeft = t; d.ebLength = t; d.edgebugTick = tickCount + t; d.detectTick = tickCount;
                     d.fwd = c.forwardmove; d.side = c.sidemove; d.yawDelta = yd;
@@ -776,6 +778,7 @@ static void EbHwPost(void* pLocal, UserCmd_t* pCmd, bool bTaken)
     auto loop = [&](bool ducked, bool strafe)
     {
         if (s_ebHw.will) return;
+        if (g_edgeBugCurStance && ducked != ((s_ebUserButtons & IN_DUCK) != 0)) return;   // hw: own rounds, not the stance combo
         RestoreEntityToPredicted();
         s_ebHw.startYaw = origView.y;
         int pathN = 0;
@@ -1163,6 +1166,8 @@ static void EbLobPost(void* pLocal, UserCmd_t* pCmd, bool bTaken)
             for (int v = 0; v < search; v++)
             {
                 if (s.lastType) { v = s.lastType; s.lastType = 0; }
+                // odd variant = duck held all run
+                if (g_edgeBugCurStance && ((v & 1) != 0) != ((s_ebUserButtons & IN_DUCK) != 0)) continue;
                 restore();
                 s.velBackup       = EntV3(pLocal, g_offVelocity);
                 pCmd->viewangles  = viewBackup;
@@ -1413,7 +1418,8 @@ static void EdgeBugPost(void* pLocal, UserCmd_t* pCmd)
 
     const int mode = std::clamp(g_edgeBugDetectMode, 0, 2);
     // botox m_edgebug_types: bit 0 ducked, bit 1 standing, none = both
-    const int stance = g_edgeBugStance & 3;
+    // current stance: the duck KEY, not FL_DUCKING (a release plan ducks from tick 0)
+    const int stance = g_edgeBugCurStance ? ((s_ebUserButtons & IN_DUCK) ? 1 : 2) : (g_edgeBugStance & 3);
     const bool allowDuck = stance == 0 || (stance & 1), allowStand = stance == 0 || (stance & 2);
     const bool steer = g_edgeBugMouseSteer;
     static Vec3 s_prevAngle{};
