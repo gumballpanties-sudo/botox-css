@@ -14,14 +14,20 @@ namespace ChamsLayers
 	// botox n_chams::e_chams_material order/names. TF2 material behind each: aim/chams.cpp.
 	enum : int {
 		// TwoTone = no material: model's own materials, DIP swaps in the two tone shader (visuals/lsd_chams.cpp)
+		// Fresnel..Sky = Atlas-TF2 chams (Neon = its "lsd"), appended so old configs keep their indices
 		Original = 0, Flat, Shaded, Wireframe, Glow, Metallic, Pearlescent, Ambient, Gold, Damascus, Crystal, Wet, Lsd, TwoTone,
+		Fresnel, Lava, Pearl, Bubble, Neon, Network, Soap, Aurora, Aquarium, Sky,
 		Count
 	};
 	inline constexpr int kMaxLayers = 8;      // botox chams_max_layers
 	inline constexpr int kCfgLen    = 160;    // 8 * strlen("11:FFFFFFFF,") + one ":FFFFFFFF" dark = 105, headroom
 
 	inline const char* const kNames[Count] = { "original", "flat", "shaded", "wireframe", "glow", "metallic",
-	                                           "pearlescent", "ambient", "gold", "damascus", "crystal", "wet", "lsd", "two tone" };
+	                                           "pearlescent", "ambient", "gold", "damascus", "crystal", "wet", "lsd", "two tone",
+	                                           "fresnel", "lava", "pearl", "bubble", "neon", "network", "soap", "aurora", "aquarium", "sky" };
+
+	// drawn by the shader chams DIP swap (lsd_chams.h ShaderChams_*), carrier material + fx_cham_ps[index]
+	inline bool IsShader(int mat) { return mat > Original && mat < Count && mat != Lsd && mat != TwoTone; }
 
 	struct List
 	{

@@ -132,17 +132,12 @@ namespace
 	struct Mat
 	{
 		IMaterial*   pMat = nullptr;
-		bool         bShared = false;      // ambient: one found material serves both variants
 	};
 	Mat  s_mats[ChamsLayers::Count][2];
 	int  s_buildIndex = 1;                 // next material to build (Original = 0 needs none)
 	int  s_lastBuildFrame = -1;
 	bool s_built = false;
 	bool s_loggedBuilt = false;
-
-	// botox gold tint multipliers
-	constexpr float kGoldEnv[3]   = { 0.55f, 0.3f, 0.05f };
-	constexpr float kGoldPhong[3] = { 0.6f, 0.35f, 0.08f };
 
 	ChamsMatVar* FindVar(IMaterial* p, const char* name)
 	{
@@ -190,92 +185,20 @@ namespace
 		}
 	}
 
-	// botox's CS:GO material list mapped to CSS content (every path checked in the installed
-	// cstrike/hl2 vpks 11-07; the TF2 ones -- shared_normal, sky_dustbowl, cubemap_sheen002,
-	// ice_player, bare "white" -- do not exist in CSS and drew blank):
-	//   vgui/white, effects/flat_normal, debug/debugambientcube = botox's own paths
-	//   models/effects/cube_white (botox glow/metallic)  -> editor/cubemap.hdr (32x32, reflectivity 1,1,1)
-	//   editor/cube_vertigo / crystal_cube_vertigo_hdr  -> matsys_regressiontest/cubemap (512, detailed)
-	//   damascus paint (CS:GO only)                     -> de_piranesi/marblefloor13 (veined marble)
+	// Shader chams carriers (11-11, Atlas-TF2 style): the look is fx_cham_ps[index], swapped in by the DIP detour
+	// (lsd_chams.cpp DrawCham), so every slot is the same plain vertexlit white -- a shader that exists at every
+	// graphics setting and brings normals + the ambient cube. The old envmap / phong / bump materials changed
+	// look (or went flat white) with mat_phong / mat_specular / shader detail. Damascus keeps its texture (s0).
 	void BuildOne(int index)
 	{
 		using namespace ChamsLayers;
-		switch (index)
-		{
-		case Flat:
-			MakeVariants(Flat, "flat", "UnlitGeneric", "\t\"$basetexture\" \"vgui/white\"\n");
-			break;
-		case Shaded:
-			MakeVariants(Shaded, "shaded", "VertexLitGeneric", "\t\"$basetexture\" \"vgui/white\"\n\t\"$halflambert\" \"1\"\n");
-			break;
-		case Wireframe:
-			MakeVariants(Wireframe, "wireframe", "UnlitGeneric", "\t\"$basetexture\" \"vgui/white\"\n\t\"$wireframe\" \"1\"\n");
-			break;
-		case Glow:   // ref "Fresnel": additive fresnel rim, the TF2 analog of botox's envmap-fresnel glow
-			MakeVariants(Glow, "glow", "VertexLitGeneric",
-				"\t\"$basetexture\" \"vgui/white\"\n\t\"$bumpmap\" \"effects/flat_normal\"\n"
-				"\t\"$color2\" \"[0 0 0]\"\n\t\"$additive\" \"1\"\n\t\"$phong\" \"1\"\n"
-				"\t\"$phongfresnelranges\" \"[0 0.5 1]\"\n\t\"$envmap\" \"editor/cubemap.hdr\"\n"
-				"\t\"$envmapfresnel\" \"1\"\n\t\"$envmaptint\" \"[1 1 1]\"\n");
-			break;
-		case Metallic:   // ref "Shine" + botox $envmapcontrast
-			MakeVariants(Metallic, "metallic", "VertexLitGeneric",
-				"\t\"$additive\" \"1\"\n\t\"$envmap\" \"editor/cubemap.hdr\"\n"
-				"\t\"$envmaptint\" \"[1 1 1]\"\n\t\"$envmapcontrast\" \"1\"\n");
-			break;
-		case Pearlescent:   // TF2 VertexLitGeneric has no $pearlescent: botox's phong set, bumped (TF2 phong needs a bumpmap)
-			MakeVariants(Pearlescent, "pearlescent", "VertexLitGeneric",
-				"\t\"$basetexture\" \"vgui/white\"\n\t\"$bumpmap\" \"effects/flat_normal\"\n"
-				"\t\"$phong\" \"1\"\n\t\"$phongboost\" \"2\"\n\t\"$phongfresnelranges\" \"[0.5 0.5 0.5]\"\n"
-				"\t\"$phongexponent\" \"10\"\n\t\"$phongtint\" \"[1 1 1]\"\n");
-			break;
-		case Ambient:   // botox from_name: one engine material, both variants, flags toggled per draw
-		{
-			auto pMat = VCallAt<IMaterial*>(g_matSystem, kMatSysFindMaterial, "debug/debugambientcube", "Model textures", false, (const char*)nullptr);
-			if (pMat && !pMat->IsErrorMaterial())
-			{
-				pMat->IncrementReferenceCount();
-				for (int v = 0; v < 2; ++v) { s_mats[Ambient][v].pMat = pMat; s_mats[Ambient][v].bShared = true; }
-			}
-			else
-				DebugLog("chams: debug/debugambientcube not found");
-			break;
-		}
-		case Gold:
-			MakeVariants(Gold, "gold", "VertexLitGeneric",
-				"\t\"$basetexture\" \"vgui/white\"\n\t\"$bumpmap\" \"effects/flat_normal\"\n"
-				"\t\"$color2\" \"[.2 .11 .02]\"\n\t\"$envmap\" \"matsys_regressiontest/cubemap\"\n\t\"$envmaptint\" \"[.55 .3 .05]\"\n"
-				"\t\"$envmapfresnel\" \".6\"\n\t\"$phong\" \"1\"\n\t\"$phongfresnelranges\" \"[.7 .8 1]\"\n"
-				"\t\"$phongtint\" \"[.6 .35 .08]\"\n\t\"$phongboost\" \"6\"\n\t\"$phongexponent\" \"128\"\n"
-				"\t\"$phongdisablehalflambert\" \"1\"\n");
-			break;
-		case Damascus:   // CS:GO paint texture -> TF2's own frozen-player texture, botox's phong set
-			MakeVariants(Damascus, "damascus", "VertexLitGeneric",
-				"\t\"$basetexture\" \"de_piranesi/marblefloor13\"\n\t\"$bumpmap\" \"effects/flat_normal\"\n"
-				"\t\"$phong\" \"1\"\n\t\"$phongboost\" \"4\"\n\t\"$phongexponent\" \"16\"\n"
-				"\t\"$phongfresnelranges\" \"[.5 .75 1]\"\n\t\"$phongtint\" \"[1 1 1]\"\n");
-			break;
-		case Crystal:
-			MakeVariants(Crystal, "crystal", "VertexLitGeneric",
-				"\t\"$basetexture\" \"vgui/white\"\n\t\"$color2\" \"[0 0 0]\"\n\t\"$bumpmap\" \"effects/flat_normal\"\n"
-				"\t\"$translucent\" \"1\"\n\t\"$envmap\" \"matsys_regressiontest/cubemap\"\n\t\"$envmaptint\" \"[1 1 1]\"\n"
-				"\t\"$envmapsaturation\" \"0.1\"\n\t\"$phong\" \"1\"\n\t\"$phongexponent\" \"16\"\n"
-				"\t\"$phongboost\" \"2\"\n\t\"$phongtint\" \"[1 1 1]\"\n");
-			break;
-		case Wet:
-			MakeVariants(Wet, "wet", "VertexLitGeneric",
-				"\t\"$basetexture\" \"vgui/white\"\n\t\"$bumpmap\" \"effects/flat_normal\"\n"
-				"\t\"$additive\" \"1\"\n\t\"$color2\" \"[0 0 0]\"\n\t\"$envmap\" \"env_cubemap\"\n"
-				"\t\"$envmaptint\" \"[1 1 1]\"\n\t\"$envmapfresnel\" \"1\"\n\t\"$phong\" \"1\"\n"
-				"\t\"$phongexponent\" \"200\"\n\t\"$phongboost\" \"10\"\n\t\"$phongfresnelranges\" \"[.2 .5 1]\"\n"
-				"\t\"$phongtint\" \"[1 1 1]\"\n\t\"$phongdisablehalflambert\" \"1\"\n");
-			break;
-		case Lsd:   // botox case 11 carrier: flat white, the DIP detour swaps in the lsd shaders (visuals/lsd_chams.cpp)
+		if (index == Lsd)   // botox case 11 carrier: flat white, the DIP detour swaps in the lsd shaders
 			MakeVariants(Lsd, "lsd", "UnlitGeneric", "\t\"$basetexture\" \"vgui/white\"\n");
-			break;
-		default:
-			break;
-		}
+		else if (IsShader(index))
+			MakeVariants(index, kNames[index], "VertexLitGeneric",
+				index == Damascus ? "\t\"$basetexture\" \"de_piranesi/marblefloor13\"\n"
+				: index == Wireframe || index == Network ? "\t\"$basetexture\" \"vgui/white\"\n\t\"$wireframe\" \"1\"\n"
+				: "\t\"$basetexture\" \"vgui/white\"\n");
 	}
 
 	// botox create(): one material per frame on the render path (never off-thread), so the first
@@ -313,17 +236,6 @@ namespace
 	{
 		I::RenderView->SetColorModulation(c);
 		I::RenderView->SetBlend(c[3] * alphaScale);
-	}
-
-	void ApplyColor(int index, Mat& m, const float c[4], float alphaScale)
-	{
-		SetModulation(c, alphaScale);
-		const bool bGold = index == ChamsLayers::Gold;
-		if (!m.pMat) return;
-		if (auto pEnvTint = FindVar(m.pMat, "$envmaptint"))
-			bGold ? pEnvTint->SetVecValue(c[0] * kGoldEnv[0], c[1] * kGoldEnv[1], c[2] * kGoldEnv[2]) : pEnvTint->SetVecValue(c[0], c[1], c[2]);
-		if (auto pPhongTint = FindVar(m.pMat, "$phongtint"))
-			bGold ? pPhongTint->SetVecValue(c[0] * kGoldPhong[0], c[1] * kGoldPhong[1], c[2] * kGoldPhong[2]) : pPhongTint->SetVecValue(c[0], c[1], c[2]);
 	}
 
 	// one model draw through the original DrawModelExecute, optionally on other bones
@@ -371,23 +283,22 @@ namespace
 			}
 			IMaterial* pMat = GetMat(index, ignorez);
 			if (!pMat) continue;
-			Mat& m = s_mats[index][ignorez ? 1 : 0];
-			ApplyColor(index, m, c, alphaScale);
-			if (m.bShared)
-			{
-				pMat->SetMaterialVarFlag(MATERIAL_VAR_IGNOREZ, ignorez);
-				pMat->SetMaterialVarFlag(MATERIAL_VAR_ZNEARER, ignorez);
-				pMat->SetMaterialVarFlag(MATERIAL_VAR_NOFOG, ignorez);
-			}
+			SetModulation(c, alphaScale);
 			ForceMaterial(pMat);
+			const float flTime = I::GlobalVars ? I::GlobalVars->realtime : 0.f;
 			if (index == ChamsLayers::Lsd)
 			{
-				LsdChams_Begin(I::GlobalVars ? I::GlobalVars->realtime : 0.f, c[3] * alphaScale);
+				LsdChams_Begin(flTime, c[3] * alphaScale);
 				ctx.Draw(pBones);
 				LsdChams_End();
 			}
 			else
+			{
+				const float color[4] = { c[0], c[1], c[2], c[3] * alphaScale };
+				ShaderChams_Begin(index, color, flTime, ignorez);
 				ctx.Draw(pBones);
+				ShaderChams_End();
+			}
 			bDrew = true;
 		}
 		ForceMaterial(nullptr);
@@ -581,11 +492,10 @@ void Chams_ReleaseMaterials()
 		for (int v = 0; v < 2; ++v)
 		{
 			Mat& m = s_mats[i][v];
-			if (m.pMat && !(m.bShared && v == 1))
+			if (m.pMat)
 			{
 				m.pMat->DecrementReferenceCount();
-				if (!m.bShared)
-					m.pMat->DeleteIfUnreferenced();
+				m.pMat->DeleteIfUnreferenced();
 			}
 			m = Mat{};
 		}

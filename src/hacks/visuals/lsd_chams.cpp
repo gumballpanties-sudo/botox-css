@@ -14,6 +14,7 @@
 //     EndScene 42 / Present 17 that thread.cpp hooks) is hooked lazily on the first lsd draw, so a
 //     cfg without lsd never pays a detour on every draw call
 #include "lsd_chams.h"
+#include "chams_layers.h"
 #include "../../globals/globals.h"
 #include "../movement/prediction.h"          // g_globalVars -- sheen's sweep clock
 #include "../screen/screenfx.h"              // ScreenFx_QueueFunctor
@@ -29,8 +30,11 @@
 #include "../screen/shaders/fx_sheen_vs0.h"   // k_fxSheenVs0Bytes (float verts)
 #include "../screen/shaders/fx_sheen_vs1.h"   // k_fxSheenVs1Bytes (COMPRESSED_VERTS)
 #include "../screen/shaders/fx_sheen_ps.h"    // k_fxSheenPsBytes
+#include "../screen/shaders/fx_cham_vs.h"     // k_fxChamVs0 / 1 (float / compressed verts)
+#include "../screen/shaders/fx_cham_ps.h"     // k_fxChamPs[mode]
 #include "chams_api.h"       // o_ForcedMaterialOverride, Chams_GetSheenCarrierMaterial (NEEDS FROM OTHERS)
 #include <algorithm>
+#include <cmath>
 #include <atomic>
 #include <cstring>
 #include <unordered_map>
@@ -404,6 +408,149 @@ namespace
 		return hr;
 	}
 
+	// ---- shader chams (fx_cham_*.hlsl, Atlas-TF2 model.hlsl): every material slot but original / lsd / two tone ----
+	std::atomic<bool> s_chArmed{ false };
+	float s_chColor[4] = {}, s_chTime = 0.f;   // render thread only
+	int   s_chMode = 0;
+	bool  s_chIgnorez = false;
+
+	IDirect3DVertexShader9* s_chVs[2] = {};
+	IDirect3DPixelShader9*  s_chPs[ChamsLayers::Count] = {};
+	static_assert(sizeof(k_fxChamPs) / sizeof(k_fxChamPs[0]) == ChamsLayers::Count, "fx_cham_build.sh COUNT != ChamsLayers::Count");
+	Defs s_chVsDefs, s_chPsDefs;
+	bool s_chReady = false, s_chGpuFailed = false;
+
+	std::vector<DWORD> Code(const BYTE* bytes, unsigned size)
+	{
+		std::vector<DWORD> c((size + 3) / 4);
+		memcpy(c.data(), bytes, size);
+		return c;
+	}
+
+	bool ChamGpuReady(IDirect3DDevice9* dev)
+	{
+		if (s_chReady) return true;
+		if (s_chGpuFailed) return false;
+		const std::vector<DWORD> vs[2] = { Code(k_fxChamVs0), Code(k_fxChamVs1) };
+		bool ok = true;
+		for (int i = 0; i < 2 && ok; i++)
+			if ((ok = SUCCEEDED(dev->CreateVertexShader(vs[i].data(), &s_chVs[i]))))
+				CollectDefs(vs[i].data(), s_chVsDefs);
+		for (int m = 0; m < ChamsLayers::Count && ok; m++)
+		{
+			if (!k_fxChamPs[m].bytes) continue;
+			const auto ps = Code(k_fxChamPs[m].bytes, k_fxChamPs[m].size);
+			if ((ok = SUCCEEDED(dev->CreatePixelShader(ps.data(), &s_chPs[m]))))
+				CollectDefs(ps.data(), s_chPsDefs);   // union of every mode's defs
+		}
+		if (ok)
+		{
+			DebugLog("CHAM: shaders ready (%d vs defs, %d ps defs)", int(s_chVsDefs.size()), int(s_chPsDefs.size()));
+			return s_chReady = true;
+		}
+		DebugLog("CHAM: gpu FAILED -- shader chams draw as the plain white carrier");
+		for (auto*& v : s_chVs) if (v) { v->Release(); v = nullptr; }
+		for (auto*& p : s_chPs) if (p) { p->Release(); p = nullptr; }
+		s_chVsDefs.clear(); s_chPsDefs.clear();
+		s_chGpuFailed = true;
+		return false;
+	}
+
+	// Atlas model_render.hpp surface_t::additive / blends
+	bool ChamAdditive(int m)
+	{
+		using namespace ChamsLayers;
+		return m == Glow || m == Metallic || m == Wet || m == Fresnel || m == Neon || m == Soap || m == Aurora || m == Aquarium || m == Sky;
+	}
+
+	HRESULT DrawCham(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type, INT base, UINT minV, UINT nV, UINT start, UINT prims)
+	{
+		// no shader / not a studio mesh = the carrier (plain white vertexlit) draws as is
+		const int compressed = ChamGpuReady(dev) ? VertexCompression(dev) : -1;
+		IDirect3DPixelShader9* ps = s_chMode > 0 && s_chMode < ChamsLayers::Count ? s_chPs[s_chMode] : nullptr;
+		if (compressed < 0 || !ps)
+			return o_DIP(dev, type, base, minV, nV, start, prims);
+
+		const bool additive = ChamAdditive(s_chMode);
+		const bool blends = additive || s_chColor[3] < 1.f || s_chMode == ChamsLayers::Crystal || s_chMode == ChamsLayers::Network;
+
+		IDirect3DVertexShader9* oldVs = nullptr;
+		IDirect3DPixelShader9* oldPs = nullptr;
+		dev->GetVertexShader(&oldVs);
+		dev->GetPixelShader(&oldPs);
+
+		DWORD oldSrgb = 0, oldZFunc = 0, oldZWrite = 0, oldAlphaTest = 0, oldBlend = 0, oldSrc = 0, oldDest = 0, oldColorWrite = 0, oldTexSrgb = 0;
+		dev->GetRenderState(D3DRS_SRGBWRITEENABLE, &oldSrgb);
+		dev->GetRenderState(D3DRS_ZFUNC, &oldZFunc);
+		dev->GetRenderState(D3DRS_ZWRITEENABLE, &oldZWrite);
+		dev->GetRenderState(D3DRS_ALPHATESTENABLE, &oldAlphaTest);
+		dev->GetRenderState(D3DRS_ALPHABLENDENABLE, &oldBlend);
+		dev->GetRenderState(D3DRS_SRCBLEND, &oldSrc);
+		dev->GetRenderState(D3DRS_DESTBLEND, &oldDest);
+		dev->GetRenderState(D3DRS_COLORWRITEENABLE, &oldColorWrite);
+		dev->GetSamplerState(0, D3DSAMP_SRGBTEXTURE, &oldTexSrgb);
+
+		const float psK[2][4] = { { s_chColor[0], s_chColor[1], s_chColor[2], s_chColor[3] }, { s_chTime, 0.f, 0.f, 0.f } };
+		float oldPsK[2][4] = {};
+		static std::vector<Saved> savedVs, savedPs;   // render thread only
+		savedVs.clear(); savedPs.clear();
+		dev->GetPixelShaderConstantF(40, oldPsK[0], 2);
+		SaveConsts(dev, true, s_chVsDefs, savedVs);
+		SaveConsts(dev, false, s_chPsDefs, savedPs);
+
+		// colours are display values (Atlas: srgb write off), basetexture read raw to match
+		dev->SetRenderState(D3DRS_SRGBWRITEENABLE, FALSE);
+		dev->SetRenderState(D3DRS_ALPHATESTENABLE, FALSE);
+		dev->SetSamplerState(0, D3DSAMP_SRGBTEXTURE, FALSE);
+		if (s_chIgnorez)
+			dev->SetRenderState(D3DRS_ZFUNC, D3DCMP_ALWAYS);
+		else if (blends && (oldZFunc == D3DCMP_LESS || oldZFunc == D3DCMP_GREATER))
+			dev->SetRenderState(D3DRS_ZFUNC, oldZFunc == D3DCMP_LESS ? D3DCMP_LESSEQUAL : D3DCMP_GREATEREQUAL);
+
+		dev->SetVertexShader(s_chVs[compressed]);
+		dev->SetPixelShader(ps);
+		dev->SetPixelShaderConstantF(40, psK[0], 2);
+
+		// Atlas draw_depth_first: blended = depth only prepass, then colour on the nearest surface only
+		if (blends)
+		{
+			if (!s_chIgnorez)
+			{
+				dev->SetRenderState(D3DRS_COLORWRITEENABLE, 0);
+				dev->SetRenderState(D3DRS_ZWRITEENABLE, TRUE);
+				o_DIP(dev, type, base, minV, nV, start, prims);
+				dev->SetRenderState(D3DRS_COLORWRITEENABLE, oldColorWrite);
+			}
+			dev->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
+			dev->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+			dev->SetRenderState(D3DRS_DESTBLEND, additive ? D3DBLEND_ONE : D3DBLEND_INVSRCALPHA);
+		}
+		else
+			dev->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
+		if (s_chIgnorez || blends)
+			dev->SetRenderState(D3DRS_ZWRITEENABLE, FALSE);
+
+		const HRESULT hr = o_DIP(dev, type, base, minV, nV, start, prims);
+
+		// constants before shaders: the engine shader's own defs must win their slots
+		dev->SetRenderState(D3DRS_SRGBWRITEENABLE, oldSrgb);
+		dev->SetRenderState(D3DRS_ZFUNC, oldZFunc);
+		dev->SetRenderState(D3DRS_ZWRITEENABLE, oldZWrite);
+		dev->SetRenderState(D3DRS_ALPHATESTENABLE, oldAlphaTest);
+		dev->SetRenderState(D3DRS_ALPHABLENDENABLE, oldBlend);
+		dev->SetRenderState(D3DRS_SRCBLEND, oldSrc);
+		dev->SetRenderState(D3DRS_DESTBLEND, oldDest);
+		dev->SetSamplerState(0, D3DSAMP_SRGBTEXTURE, oldTexSrgb);
+		dev->SetPixelShaderConstantF(40, oldPsK[0], 2);
+		RestoreConsts(dev, true, savedVs);
+		RestoreConsts(dev, false, savedPs);
+		dev->SetVertexShader(oldVs);
+		dev->SetPixelShader(oldPs);
+		if (oldVs) oldVs->Release();
+		if (oldPs) oldPs->Release();
+		return hr;
+	}
+
 	// weapon sheen's armed flag + draw function are defined below (after two-tone, in their own
 	// section); forward-declared here so h_DIP (which dispatches to all three) can see them --
 	// the alternative (moving ~460 lines above h_DIP) would bury the sheen section between lsd
@@ -427,6 +574,8 @@ namespace
 			return DrawTwoTone(dev, type, base, minV, nV, start, prims);
 		if (s_armed.load(std::memory_order_relaxed))
 			return DrawLsd(dev, type, base, minV, nV, start, prims);
+		if (s_chArmed.load(std::memory_order_relaxed))
+			return DrawCham(dev, type, base, minV, nV, start, prims);
 		return o_DIP(dev, type, base, minV, nV, start, prims);
 	}
 
@@ -486,6 +635,25 @@ namespace
 	TtFunctor s_ttArms[1024];
 	unsigned  s_ttArmNext = 0;
 	TtFunctor s_ttDisarm = { s_ttDisarmVt };
+
+	// shader chams: same ring scheme
+	struct ChFunctor { void** vfptr; float color[4]; float time; int mode; bool ignorez; };
+	void __fastcall Fn_ChArm(void* p)
+	{
+		auto* f = static_cast<ChFunctor*>(p);
+		memcpy(s_chColor, f->color, sizeof(s_chColor));
+		s_chTime = f->time;
+		s_chMode = f->mode;
+		s_chIgnorez = f->ignorez;
+		s_chArmed.store(true, std::memory_order_relaxed);
+	}
+	void __fastcall Fn_ChDisarm(void*) { s_chArmed.store(false, std::memory_order_relaxed); }
+
+	void* s_chArmVt[4]    = { (void*)&Fn_AddRef, (void*)&Fn_Release, (void*)&Fn_Dtor, (void*)&Fn_ChArm };
+	void* s_chDisarmVt[4] = { (void*)&Fn_AddRef, (void*)&Fn_Release, (void*)&Fn_Dtor, (void*)&Fn_ChDisarm };
+	ChFunctor s_chArms[1024];
+	unsigned  s_chArmNext = 0;
+	ChFunctor s_chDisarm = { s_chDisarmVt };
 
 	// ==== weapon sheen (botox hacks/visuals/weapon_sheen.cpp + model_shader.h, 1:1) ================
 	// Round-5 fix: lsd_chams.h/.cpp's own round-4 note ("botox's real weapon sheen needs no DIP
@@ -1078,4 +1246,25 @@ void WeaponSheen_Destroy()
 	s_sheenMasks.clear();
 	for (auto*& c : s_sheenCubes) if (c) { c->Release(); c = nullptr; }
 	s_sheenVsDefs.clear(); s_sheenPsDefs.clear();
+}
+
+void ShaderChams_Begin(int mode, const float color[4], float realTime, bool ignorez)
+{
+	EnsureHook();
+	if (!o_DIP) return;
+	ChFunctor& f = s_chArms[s_chArmNext++ & 1023];
+	f.vfptr = s_chArmVt;
+	memcpy(f.color, color, sizeof(f.color));
+	f.time = std::fmod(realTime, 1024.f);   // Atlas TIME_WRAP: float precision stays fine
+	f.mode = mode;
+	f.ignorez = ignorez;
+	if (!ScreenFx_QueueFunctor(&f))
+		Fn_ChArm(&f);   // mat_queue_mode 0: this thread is the render thread
+}
+
+void ShaderChams_End()
+{
+	if (!o_DIP) return;
+	if (!ScreenFx_QueueFunctor(&s_chDisarm))
+		Fn_ChDisarm(&s_chDisarm);
 }
