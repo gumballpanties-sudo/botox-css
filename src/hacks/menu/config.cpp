@@ -593,6 +593,7 @@ static const CfgEntry kEntries[] = {
     { "blockBotMode",      CfgEntry::INT,   &g_blockBotMode, 0 },
 
     // fake movement (fm*) rows removed (11-03/11-04): no botox csgo equivalent, see globals.h
+    { "fmWallbugFix",     CfgEntry::BOOL,   &g_fmWallbugFix, 0 },
     { "psFinder",         CfgEntry::BOOL,   &g_psFinder, 0 },
     { "psFinderKey",      CfgEntry::INT,    &g_psFinderKey, 0 },
     { "psFinderMode",     CfgEntry::INT,    &g_psFinderMode, 0 },

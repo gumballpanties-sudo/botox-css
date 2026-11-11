@@ -214,6 +214,11 @@ void CssBridge_SetViewAngles(float pitch, float yaw, float roll)
 	I::EngineClient->SetViewAngles(ang);
 }
 bool CssBridge_IsPlayingDemo() { return I::EngineClient && I::EngineClient->IsPlayingDemo(); }
+bool CssBridge_IsLoopback()
+{
+	auto pNetChan = I::EngineClient ? I::EngineClient->GetNetChannelInfo() : nullptr;   // = SDK::IsLoopback
+	return pNetChan && pNetChan->IsLoopback();
+}
 
 // ================ bone / hitbox positions (round 2): same SetupBones + pHitboxSet/pHitbox
 // call esp.cpp:545-548 and aim_hitscan.cpp:104-109 already run live every frame/shot. No new

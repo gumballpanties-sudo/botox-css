@@ -452,6 +452,13 @@ static void Page_MovementMain()
     // "fake movement" group (and column) removed entirely (11-03/11-04): no botox csgo
     // equivalent (CS:GO has no such feature, including "wallbug fix (sv_wallbug 1)" -- a TF2 x64
     // engine-build cvar). Code/globals/tests all deleted, see report CMAKE + files list.
+    // 11-11: group back with one row -- CSS x64 has the same ClipVelocity bandaid (no cvar), patched
+    // out in server+client.dll while hosting (movement.cpp FakeMove_Tick). Remote servers untouched.
+    if (menu_group_begin("fake movement"))
+    {
+        ImGui::Checkbox("wallbug fix (local server)", &g_fmWallbugFix);
+    }
+    menu_group_end();
 
     // botox "other" group, case 0 :870-1015. CSS used to split this across "movement"/"practice"/
     // "pixel surf" groups -- folded back into one "other" group, botox order, 11-04.

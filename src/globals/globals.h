@@ -728,7 +728,8 @@ extern bool g_blockBot;    extern int g_blockBotKey;    extern int g_blockBotMod
 // and their tests removed, every g_fm* global removed. FakeMove_Restore()/FakeMove_DemoTick()
 // stay declared because src/hooks/thread.cpp:535 and src/hooks/fsn.cpp:41 call them (not mine
 // to edit) -- now no-op stubs defined in movement.cpp, see report NEEDS FROM OTHERS.
-void FakeMove_Restore();          // no-op stub now (movement.cpp)
+extern bool g_fmWallbugFix;       // 11-11: loopback host -> ClipVelocity bandaid (max + 1/32 push) patched out
+void FakeMove_Restore();          // eject: ClipVelocity bytes back (movement.cpp)
 void FakeMove_DemoTick();         // no-op stub now (movement.cpp)
 // botox air_stuck knobs (m_air_stuck_extra_reach / m_air_stuck_budget)
 extern float g_asExtraReach;       // wall scan reach past the hull, units (def 4, 0-32; > 2 arms the wide B scan)

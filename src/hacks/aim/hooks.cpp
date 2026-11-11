@@ -15,6 +15,15 @@
 #include "scope_fov.h"
 #include "hud_aim.h"   // unit hud: botox hud group data, collected in IEngineVGui_Paint
 
+// CSS viewmodel = server class CPredictedViewModel (CBaseViewModel base). ETFClassID::CTFViewModel
+// (320) = TF2 class index, matches some other CSS class.
+static bool IsViewModel(CBaseEntity* pEntity)
+{
+	auto pClass = pEntity->GetClientClass();
+	const char* sz = pClass ? pClass->GetName() : nullptr;
+	return sz && (!strcmp(sz, "CPredictedViewModel") || !strcmp(sz, "CBaseViewModel"));
+}
+
 // Remove interp targets: remote players + the viewmodel. ref hits every non-local entity;
 // projectiles / props / the local player model stay smooth here.
 static bool RemoveInterpTarget(void* rcx)
@@ -22,7 +31,7 @@ static bool RemoveInterpTarget(void* rcx)
 	if (!G::RemoveInterp() || rcx == H::Entities.GetLocal())
 		return false;
 	auto pEntity = reinterpret_cast<CBaseEntity*>(rcx);
-	return pEntity->IsPlayer() || pEntity->GetClassID() == ETFClassID::CTFViewModel;
+	return pEntity->IsPlayer() || IsViewModel(pEntity);
 }
 
 // ================ CBaseAnimating_Interpolate.cpp ================
@@ -99,11 +108,11 @@ MAKE_HOOK(CBaseAnimating_SetSequence, S::CBaseAnimating_SetSequence(), void,
 }
 
 // ================ CBaseAnimating_UpdateClientSideAnimation.cpp ================
-// CSS sig: TF2's tail bytes ("84 C0 75 ? 33 FF 48 3B DF") don't match CSS (sig_check.md:
-// MISSING). Re-derived against the live CSS client.dll (cstrike/bin/x64/client.dll):
-// the 31-byte prefix up to and including the "FF 90" vtable call is unique (1 hit),
-// verified with a relaxed-prefix scan, not guessed.
-MAKE_SIGNATURE(CBaseAnimating_UpdateClientSideAnimation, "client.dll", "48 89 5C 24 ? 57 48 83 EC ? 48 8B D9 E8 ? ? ? ? 48 8B F8 48 85 C0 74 ? 48 8B 00 48 8B CF FF 90", 0x0);
+// CSS target = C_CSPlayer::UpdateClientSideAnimation (c_cs_player.cpp:1554), client+0x1ed310 =
+// C_CSPlayer vt[193]; slot from C_BaseAnimating::UpdateClientSideAnimations' loop
+// `call [rax+0x608]`. Old sig (prefix "... 48 8B D9 E8 ? ? ? ? 48 8B F8") hit client+0x4e600 =
+// weapon vt[246]: RemoveInterpAnims ran weapon code on every player = disable interp crash.
+MAKE_SIGNATURE(CBaseAnimating_UpdateClientSideAnimation, "client.dll", "48 89 5C 24 ? 57 48 83 EC ? 83 B9 ? ? ? ? FF 48 8B D9 74 ? 48 8B 01 0F 57 C9 FF 90 ? ? ? ? E8 ? ? ? ? 48 8B BB", 0x0);
 
 MAKE_HOOK(CBaseAnimating_UpdateClientSideAnimation, S::CBaseAnimating_UpdateClientSideAnimation(), void,
 	void* rcx)
@@ -111,14 +120,10 @@ MAKE_HOOK(CBaseAnimating_UpdateClientSideAnimation, S::CBaseAnimating_UpdateClie
 
 	auto pLocal = H::Entities.GetLocal();
 	auto pPlayer = reinterpret_cast<CCSPlayer*>(rcx);
-	// The local-player skip is what hands its animation over to the custom LocalAnimations() path in
-	// CreateMove. Only do that when a feature actually needs it - otherwise let the engine advance the
-	// local model per frame (vanilla, smooth). Demo playback already never skips, hence stays smooth.
-	// Remove interp: remote players animate only from H::Entities.Store's per-tick loop
-	// (G::UpdatingAnims). Local excluded -- LocalAnimations only steps it when a tick feature needs it.
-	// CSS_STUB tf2 api: TF_COND_HALLOWEEN_KART dropped, CSS has no kart condition.
-	if (G::RemoveInterp() && !G::UpdatingAnims && pPlayer != pLocal && pPlayer->IsPlayer()
-		|| pPlayer == pLocal && !I::EngineClient->IsPlayingDemo() && F::Ticks.NeedsLocalAnimationFix())
+	// Remove interp: remote players animate only from RemoveInterpAnims' per-tick loop
+	// (G::UpdatingAnims). TF2's local skip (NeedsLocalAnimationFix -> LocalAnimations) dropped:
+	// LocalAnimations is a no-op on CSS, skipping here would freeze the local model during tick shift.
+	if (G::RemoveInterp() && !G::UpdatingAnims && pPlayer != pLocal && pPlayer->IsPlayer())
 		return;
 
 	CALL_ORIGINAL(rcx);
@@ -161,7 +166,7 @@ MAKE_HOOK(CBaseEntity_BaseInterpolatePart1, S::CBaseEntity_BaseInterpolatePart1(
 {
 
 	auto pEntity = reinterpret_cast<CBaseEntity*>(rcx);
-	if (pEntity && pEntity->GetClassID() == ETFClassID::CTFViewModel && F::Ticks.m_bRecharge)
+	if (pEntity && F::Ticks.m_bRecharge && IsViewModel(pEntity))
 	{
 		bNoMoreChanges = 1;
 		return 0;

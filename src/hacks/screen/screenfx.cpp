@@ -74,6 +74,51 @@ using GetDS_t = HRESULT(__stdcall*)(IDirect3DDevice9*, IDirect3DSurface9**);
 static SetDS_t o_SetDepthStencil = nullptr;
 static GetDS_t o_GetDepthStencil = nullptr;
 
+// ---- fetch4 (amd, intel gen6+, dxvk) ------------------------------------------------------
+// A POINT sampler left at D3DSAMP_MIPMAPLODBIAS = 'GET4' gathers a 2x2 texel block instead of
+// one texel. Source turns it on for its shadow depth on cards that have it, and it sticks to
+// the stage -- so on a radeon every INTZ read of ours came back as a neighbour's depth, nvidia
+// never saw it. 'GET1' turns it off (amd "advanced dx9 capabilities" paper); the game's value
+// goes back after, because its own state cache would never send it again. DF24 is the
+// detection the paper and aras-p give: off it, 'GET1' would only be a junk lod bias.
+static bool s_fetch4 = false;
+static constexpr DWORD k_fetch4Off = MAKEFOURCC('G','E','T','1');
+
+struct FxNoFetch4
+{
+    IDirect3DDevice9* dev;
+    DWORD old[16];
+    explicit FxNoFetch4(IDirect3DDevice9* d) : dev(s_fetch4 ? d : nullptr)
+    {
+        if (!dev) return;
+        for (DWORD u = 0; u < 16; ++u) {
+            if (FAILED(dev->GetSamplerState(u, D3DSAMP_MIPMAPLODBIAS, &old[u]))) old[u] = 0;
+            dev->SetSamplerState(u, D3DSAMP_MIPMAPLODBIAS, k_fetch4Off);
+        }
+    }
+    ~FxNoFetch4()
+    {
+        if (dev) for (DWORD u = 0; u < 16; ++u) dev->SetSamplerState(u, D3DSAMP_MIPMAPLODBIAS, old[u]);
+    }
+};
+
+// RESZ / StretchRectEx copy the bound z buffer whole into our INTZ. A z buffer of another size
+// is undefined on the retail runtime (only the debug runtime validates it) -- garbage or a
+// driver fault on amd. Equal or nothing, logged once with both sizes.
+static bool FxDepthFits(IDirect3DSurface9* depthSurf, const D3DSURFACE_DESC& bbDesc)
+{
+    D3DSURFACE_DESC dd{};
+    if (SUCCEEDED(depthSurf->GetDesc(&dd)) && dd.Width == bbDesc.Width && dd.Height == bbDesc.Height)
+        return true;
+    static bool logged = false;
+    if (!logged) {
+        logged = true;
+        DebugLog("^FX: z buffer %ux%u != frame %ux%u -- depth passes skipped while it differs",
+                 (unsigned)dd.Width, (unsigned)dd.Height, (unsigned)bbDesc.Width, (unsigned)bbDesc.Height);
+    }
+    return false;
+}
+
 static int  s_frame        = 0;                   // bumped in h_Present
 static int  s_resolvedFrm  = -1;                  // one resolve per frame, whoever asks first
 static int  s_bbScene      = 0;                   // backbuffer scenes seen so far this frame
@@ -484,6 +529,9 @@ static bool FxEnsure(IDirect3DDevice9* dev, const D3DSURFACE_DESC& desc)
                                         D3DFMT_X8R8G8B8, D3DUSAGE_DEPTHSTENCIL,
                                         D3DRTYPE_TEXTURE, k_fmtINTZ));
         s_reszOk = resz && intz;
+        s_fetch4 = SUCCEEDED(d3d->CheckDeviceFormat(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL,
+                                        D3DFMT_X8R8G8B8, D3DUSAGE_DEPTHSTENCIL, D3DRTYPE_TEXTURE,
+                                        static_cast<D3DFORMAT>(MAKEFOURCC('D','F','2','4'))));
 
         D3DADAPTER_IDENTIFIER9 id{};
         if (SUCCEEDED(d3d->GetAdapterIdentifier(D3DADAPTER_DEFAULT, 0, &id))) {
@@ -493,7 +541,7 @@ static bool FxEnsure(IDirect3DDevice9* dev, const D3DSURFACE_DESC& desc)
                 DebugLog("screenfx: adapter %s vendor 0x%04x", id.Description, (unsigned)id.VendorId);
             }
         }
-        DebugLog("screenfx: resz=%d intz=%d", (int)resz, (int)intz);
+        DebugLog("screenfx: resz=%d intz=%d fetch4=%d", (int)resz, (int)intz, (int)s_fetch4);
         d3d->Release();
     }
 
@@ -1308,9 +1356,10 @@ void ScreenFx_Frame(IDirect3DDevice9* dev, bool fromPostSlot)
         return;
     }
 
-    if (FxEnsure(dev, desc) && ScreenFx_DepthTexture())   // z swap: nothing until it is live
+    if (FxDepthFits(depthSurf, desc) && FxEnsure(dev, desc) && ScreenFx_DepthTexture())   // z swap: nothing until it is live
     {
         s_resolvedFrm = s_frame;
+        FxNoFetch4 noFetch4(dev);   // probe + every pass below samples the INTZ
 
         // z swap: nothing to resolve, the INTZ is the z buffer itself
         if (s_route != FX_ROUTE_LIVE) {
@@ -1401,9 +1450,10 @@ void ScreenFx_ViewmodelFrame(IDirect3DDevice9* dev)
     IDirect3DSurface9* depthSurf = nullptr;
     if (FAILED(dev->GetDepthStencilSurface(&depthSurf)) || !depthSurf) { if (rt) rt->Release(); return; }
 
-    if (FxEnsure(dev, desc) && ScreenFx_DepthTexture())   // z swap: nothing until it is live
+    if (FxDepthFits(depthSurf, desc) && FxEnsure(dev, desc) && ScreenFx_DepthTexture())   // z swap: nothing until it is live
     {
         s_vmFrame = s_frame;
+        FxNoFetch4 noFetch4(dev);
 
         // ALWAYS RESOLVED HERE, and this is the point of the whole pass: the copy the first
         // pass worked off was taken before DrawViewModels, so the gun is not in it. This one

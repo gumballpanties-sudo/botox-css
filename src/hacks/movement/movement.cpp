@@ -1936,12 +1936,102 @@ static void FM_Brushes(const float mn[3], const float mx[3], Fn&& fn, int cap = 
 // whole-map pixel surf scan (psmap.inl, MVPS-owned): its brushes come from FM_Brushes above.
 #include "psmap.inl"
 
-// FakeMove_Restore()/FakeMove_DemoTick() deleted with fake movement (11-03/11-04), but their
-// call sites are not mine (src/hooks/thread.cpp:535 eject path, src/hooks/fsn.cpp:41 demo
-// playback stage) -- no-op stubs so those keep linking. NEEDS FROM OTHERS: drop the calls
-// whenever that unit next touches those files; harmless either way until then.
-void FakeMove_Restore() {}
-void FakeMove_DemoTick() {}
+// ---- wallbug fix (11-11): CSS x64 ClipVelocity bandaid off while we host ------------------------
+// server.dll 0x1ba2e0 / client.dll 0x118ab0 (11-11 disasm, same bytes both): out = in + n*(max(-dot*ob,0)
+// + 1/32). SDK gamemovement.cpp:3144 is out = in - n*dot*ob. The two extra instrs = TF2's Oct-2026
+// `min(backoff,0) - DIST_EPSILON` that sv_wallbug 1 reverts -- CSS has no cvar, so patch them:
+//   +0x08 maxss xmm8,xmm9    F3 45 0F 5F C1 -> F3 45 0F 10 C0  (movss xmm8,xmm8 = nop, bytes 3-4 only)
+//   +0x11 addss xmm0,[1/32]  F3 0F 58 05 d32 -> 0F 1F 84 00 00 00 00 00  (8-byte nop)
+// Both dlls, so client prediction matches the listen server. Loopback only: a remote server
+// keeps the nudge, and a patched client there would mispredict every clip.
+// Each edit sits in ONE aligned qword -> one interlocked write, so the poll thread restoring at
+// eject can never hand the game thread a torn instruction. Ceiling: a build that shifts the
+// alignment is refused (logged), not split.
+static const char* const k_clipSig =
+    "44 0F 57 05 ? ? ? ? F3 45 0F 5F C1 41 0F 28 C0 F3 0F 58 05 ? ? ? ? F3 0F 59 F8";
+struct ClipSite { volatile LONG64* q; LONG64 orig, patched; };
+static ClipSite s_clip[4];
+static int  s_clipState = 0;       // 0 unresolved, 1 resolved, -1 dead (sig / alignment / const miss)
+static bool s_clipOn = false;
+static HMODULE s_clipMods[2] = {};
+
+static bool ClipSiteMake(uint8_t* at, const uint8_t* bytes, int len, ClipSite& out)
+{
+    uint8_t* q = reinterpret_cast<uint8_t*>(reinterpret_cast<uintptr_t>(at) & ~uintptr_t(7));
+    if (at + len > q + 8) return false;
+    out.q = reinterpret_cast<volatile LONG64*>(q);
+    out.orig = *out.q;
+    out.patched = out.orig;
+    memcpy(reinterpret_cast<uint8_t*>(&out.patched) + (at - q), bytes, len);
+    return true;
+}
+
+static void ClipResolve()
+{
+    static const uint8_t kMovss[2] = { 0x10, 0xC0 };
+    static const uint8_t kNop8[8]  = { 0x0F, 0x1F, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00 };
+    const char* names[2] = { "server.dll", "client.dll" };
+    for (int i = 0; i < 2; ++i)
+    {
+        HMODULE m = GetModuleHandleA(names[i]);
+        uint8_t* hit = m ? PatternScanUnique(m, k_clipSig) : nullptr;
+        bool ok = hit != nullptr;
+        __try {
+            if (ok) {   // the addss operand must really be 1/32 (rip-rel: next ip = hit+0x19)
+                const uint8_t* c = hit + 0x19 + *reinterpret_cast<const int32_t*>(hit + 0x15);
+                ok = *reinterpret_cast<const float*>(c) == 0.03125f;
+            }
+        } __except (EXCEPTION_EXECUTE_HANDLER) { ok = false; }
+        ok = ok && ClipSiteMake(hit + 0x0B, kMovss, 2, s_clip[i * 2])
+                && ClipSiteMake(hit + 0x11, kNop8, 8, s_clip[i * 2 + 1]);
+        if (!ok) {
+            DebugLog("wallbug fix: %s ClipVelocity %s -- option dead", names[i], hit ? "1/32 / alignment check failed" : "sig NOT FOUND");
+            s_clipState = -1;
+            return;
+        }
+        s_clipMods[i] = m;
+        DebugLog("wallbug fix: %s ClipVelocity bandaid @ rva 0x%llx", names[i], (unsigned long long)(hit - (uint8_t*)m));
+    }
+    s_clipState = 1;
+}
+
+static bool ClipWrite(const ClipSite& s, bool on)
+{
+    const LONG64 want = on ? s.patched : s.orig, from = on ? s.orig : s.patched;
+    DWORD old = 0;
+    if (!VirtualProtect((void*)s.q, 8, PAGE_EXECUTE_READWRITE, &old)) return false;
+    const LONG64 was = InterlockedCompareExchange64(s.q, want, from);
+    VirtualProtect((void*)s.q, 8, old, &old);
+    FlushInstructionCache(GetCurrentProcess(), (void*)s.q, 8);
+    return was == from || was == want;
+}
+
+static void ClipSet(bool on)
+{
+    if (on == s_clipOn || s_clipState != 1) return;
+    // dll gone / reloaded elsewhere -> the cached addresses are stale, re-resolve next time
+    if (GetModuleHandleA("server.dll") != s_clipMods[0] || GetModuleHandleA("client.dll") != s_clipMods[1])
+    {
+        s_clipState = 0; s_clipOn = false;
+        DebugLog("wallbug fix: module moved, re-resolving");
+        return;
+    }
+    bool ok = true;
+    for (const ClipSite& s : s_clip) ok = ClipWrite(s, on) && ok;
+    s_clipOn = on;
+    DebugLog("wallbug fix: ClipVelocity bandaid %s%s", on ? "OFF (patched)" : "back ON (restored)", ok ? "" : " -- a write FAILED");
+}
+
+// per cmd, game thread: CreateMove and both games' ClipVelocity run on it, never at the same time
+static void FakeMove_Tick()
+{
+    const bool want = g_fmWallbugFix && !g_eject && CssBridge_IsLoopback();
+    if (want && s_clipState == 0) ClipResolve();
+    ClipSet(want);
+}
+
+void FakeMove_Restore() { ClipSet(false); }   // eject (poll thread): interlocked writes, see above
+void FakeMove_DemoTick() {}   // fsn.cpp stage 3 call site, nothing left to do
 
 // practice tab: console commands only (bots, buildings, noclip, save/teleport). AFTER routecalc.inl
 // on purpose -- it aims with that file's RcRay and RcAimPlayerHead, which is what puts a placed
@@ -2376,7 +2466,7 @@ static void Movement_RunImpl(UserCmd_t* pCmd)
 
     ResolveNetvars();
     Movement_ResolveExtraNetvars();
-    // FakeMove_Tick() call removed with fake movement (11-03/11-04): no botox csgo equivalent
+    FakeMove_Tick();   // wallbug fix: before prediction, so this cmd's sims already clip SDK-style
     Practice_Tick(pCmd);   // same reason: a practice bind is pressed while noclipping or dead
 
     const int idx = GetLocalPlayerIndex();

@@ -221,6 +221,7 @@ bool CssBridge_TraceHullWorld(const float start[3], const float end[3], const fl
 
 void CssBridge_SetViewAngles(float pitch, float yaw, float roll);   // I::EngineClient->SetViewAngles, live in aim_rcs.cpp:148
 bool CssBridge_IsPlayingDemo();                                      // same IVEngineClient interface
+bool CssBridge_IsLoopback();                                         // SDK::IsLoopback: hosting the server we play on
 
 // SetupBones + pHitboxSet/pHitbox, the exact call esp.cpp/aim_hitscan.cpp already run per frame/shot.
 bool CssBridge_GetBonePosition(int ent, int bone, float out[3]);
