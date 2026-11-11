@@ -400,7 +400,7 @@ static void Page_MiscMain()
             ImGui::OptionPopup("hit sound settings", []() {
                 ImGui::Combo("sound##hitsound", &g_hitSoundType, "arena switch\0button\0money\0beep\0custom\0");
                 if (g_hitSoundType == 4)
-                    ImGui::InputTextWithHint("sound path##hitsndpath", "sound/weapons/myhit.wav", g_hitSoundCustom, sizeof(g_hitSoundCustom));
+                    SoundFileCombo("sound file##hitsndpath", g_hitSoundCustom, sizeof(g_hitSoundCustom));
                 ImGui::SliderFloat("volume##hitsndvol", &g_hitSoundVolume, 0.f, 2.f, "%.2f");
             }, ImVec2(220.f, -1.f));
 

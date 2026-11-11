@@ -1471,13 +1471,15 @@ static void SplitDrawData()
 
 // Render one subset through a copy of the frame's ImDrawData. CmdLists is a plain array
 // here, so the copy just points at ours; the ImDrawList objects stay owned by the context.
-static void RenderSubset(ImDrawList** lists, int count, float fade = 1.f)
+// botox slide = px down; DisplayPos feeds the backend's projection + scissor, so both move, no vertex touched
+static void RenderSubset(ImDrawList** lists, int count, float fade = 1.f, float slide = 0.f)
 {
     if (count <= 0) return;
     ImDrawData* src = ImGui::GetDrawData();
     if (!src || !src->Valid) return;
 
     ImDrawData dd = *src;
+    dd.DisplayPos.y -= slide;
     dd.CmdLists      = lists;
     dd.CmdListsCount = count;
     dd.TotalVtxCount = dd.TotalIdxCount = 0;
@@ -2501,10 +2503,13 @@ chain:
         if ((s_ovCount > 0 || s_menuCount > 0 || s_fadeCount > 0 || s_popCount > 0) && SUCCEEDED(dev->BeginScene()))
         {
             s_menuScene = true;
+            // botox: open slides up into place, close slides down: ease out cubic on the fade clock, whole px keeps text sharp
+            const float rest  = 1.f - Menu_FadeAlpha();
+            const float slide = ImFloor(12.f * Dpi_Scale() * rest * rest * rest + 0.5f);
             RenderSubset(s_ovLists, s_ovCount);
-            RenderSubset(s_fadeLists, s_fadeCount, Menu_FadeAlpha());
+            RenderSubset(s_fadeLists, s_fadeCount, Menu_FadeAlpha(), slide);
             for (int i = 0; i < s_popCount; ++i)   // botox: popups on top of the menu, each at its own alpha
-                RenderSubset(&s_popLists[i].list, 1, s_popLists[i].alpha);
+                RenderSubset(&s_popLists[i].list, 1, s_popLists[i].alpha, slide);
             RenderSubset(s_menuLists, s_menuCount);
             dev->EndScene();          // re-enters h_EndScene -- s_menuScene stands it down
             s_menuScene = false;

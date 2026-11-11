@@ -297,7 +297,8 @@ static void soft_image(ImDrawList* dl, const frame_tex_t& tex, const ImVec2 org,
                  ImVec2(tex.m_w / d, tex.m_h / d), color);
 }
 
-static bool soft_draw(ImDrawList* dl, const int bw, const int bh, const ImVec2 org, const ImU32 color, const int r[3], const std::uint64_t key)
+static bool soft_draw(ImDrawList* dl, const int bw, const int bh, const ImVec2 org, const ImU32 color, const int r[3], const std::uint64_t key,
+                      const int passes = 1)
 {
     const size_t n = (size_t)bw * bh;
     s_soft_b.resize(n);
@@ -322,11 +323,14 @@ static bool soft_draw(ImDrawList* dl, const int bw, const int bh, const ImVec2 o
     if (!tex)
         return false;
 
-    soft_image(dl, *tex, org, color);
+    for (int i = 0; i < passes; ++i)
+        soft_image(dl, *tex, org, color);
     return true;
 }
 
-static bool soft_text(ImDrawList* dl, ImFont* font, const float fs, const ImVec2 pos, const char* text, const ImU32 color, const float blur)
+// passes = same blurred copy stacked n times (glow strength)
+static bool soft_text(ImDrawList* dl, ImFont* font, const float fs, const ImVec2 pos, const char* text, const ImU32 color, const float blur,
+                      const int passes = 1)
 {
     int r[3];
     const int pad = soft_radii(blur * 0.5f, r);
@@ -360,7 +364,8 @@ static bool soft_text(ImDrawList* dl, ImFont* font, const float fs, const ImVec2
 
     const ImVec2 org((float)x0, (float)y0);
     if (const frame_tex_t* const hit = frame_tex_cached(key)) {
-        soft_image(dl, *hit, org, color);
+        for (int i = 0; i < passes; ++i)
+            soft_image(dl, *hit, org, color);
         return true;
     }
 
@@ -373,7 +378,7 @@ static bool soft_text(ImDrawList* dl, ImFont* font, const float fs, const ImVec2
     for (size_t i = 0; i < n; ++i)
         s_soft_a[i] = s_soft_cov[i] / 255.f;
 
-    return soft_draw(dl, bw, bh, org, color, r, key);
+    return soft_draw(dl, bw, bh, org, color, r, key, passes);
 }
 
 static bool soft_picture(ImDrawList* dl, const unsigned int* px, const int w, const int h, const ImVec2 at, const ImU32 color, const float blur)
@@ -785,6 +790,14 @@ static float  s_part_want_at[LBL_COUNT]{};
 static float  s_part_last[LBL_COUNT]{};
 static bool   s_part_seen[LBL_COUNT]{};
 static ImVec2 s_part_at[LBL_COUNT]{};
+static ImVec2 s_part_top[LBL_COUNT]{};
+
+// detection glow: blurred label copy in glow colour, fades over life. drawn before the labels from
+// last frame's label spots (immediate draw list, no queue to slot it under)
+static bool        s_glow_on[LBL_COUNT]{};
+static bool        s_glow_seen[LBL_COUNT]{};
+static float       s_glow_born[LBL_COUNT]{};
+static std::string s_glow_text[LBL_COUNT];
 
 static float part_rand(const float lo, const float hi)
 {
@@ -796,6 +809,7 @@ static void part_mark(const int id, const float x, const float y, const ImVec2& 
 {
     s_part_seen[id] = true;
     s_part_at[id]   = ImVec2(x + size.x * 0.5f, y + size.y * 0.5f);
+    s_part_top[id]  = ImVec2(x, y);
 }
 
 // the label's PERFORMED count: detections' fires off cmd STARTs (Points_OnTrick), the same ones chat
@@ -838,17 +852,50 @@ static void part_track(const std::vector<key_pending_t>& pending, const float re
 
         const bool phys = s_part_fired[id] >= 0;
         const bool hit  = p.m_detect && p.m_active && (phys ? fired[id] : p.m_success);
-        if (hit && (phys || !s_part_was[id]) && (real - s_part_last[id] >= cooldown || real < s_part_last[id])) {
-            s_part_want[id]    = true;
-            s_part_want_at[id] = real;
-            s_part_last[id]    = real;
+        if (hit && (phys || !s_part_was[id])) {
+            if (g_kiGlow) {
+                s_glow_on[id]   = true;
+                s_glow_born[id] = real;
+                s_glow_text[id] = p.m_text;
+            }
+            if (g_kiParticles && (real - s_part_last[id] >= cooldown || real < s_part_last[id])) {
+                s_part_want[id]    = true;
+                s_part_want_at[id] = real;
+                s_part_last[id]    = real;
+            }
         }
         s_part_was[id] = hit;
     }
 
     for (int id = 0; id < LBL_COUNT; ++id)
         if (!listed[id])
-            s_part_was[id] = s_part_want[id] = false;
+            s_part_was[id] = s_part_want[id] = s_glow_on[id] = false;
+}
+
+static void key_glow(ImFont* font, const float fs, const float real)
+{
+    const float blur   = std::clamp(g_kiGlowBlur, 1.f, 40.f);
+    const int   passes = std::clamp(g_kiGlowStrength, 1, 4);
+    const float life   = std::clamp(g_kiGlowLife, 0.05f, 10.f);
+
+    ImDrawList* const dl = draw_list();
+    for (int id = 0; id < LBL_COUNT; ++id) {
+        if (!s_glow_on[id])
+            continue;
+
+        const float age = real - s_glow_born[id];
+        if (age < 0.f || age > life) {
+            s_glow_on[id] = false;
+            continue;
+        }
+        if (!s_glow_seen[id])
+            continue;
+
+        const float  t     = 1.f - age / life;
+        const ImU32  color = ImGui::ColorConvertFloat4ToU32(ImVec4(g_kiGlowColor[0], g_kiGlowColor[1], g_kiGlowColor[2], g_kiGlowColor[3] * t * t));
+        const ImVec2 pos(std::floor(s_part_top[id].x), std::floor(s_part_top[id].y));
+        soft_text(dl, font, fs, pos, s_glow_text[id].c_str(), color, blur, passes);
+    }
 }
 
 static void part_burst(const ImVec2& at)
@@ -887,7 +934,11 @@ static void part_burst(const ImVec2& at)
 
 static void key_particles()
 {
-    if (!g_kiEnable || !g_kiParticles) {
+    std::copy(std::begin(s_part_seen), std::end(s_part_seen), std::begin(s_glow_seen));
+    if (!g_kiEnable || !g_kiGlow)
+        std::fill(std::begin(s_glow_on), std::end(s_glow_on), false);
+
+    if (!g_kiEnable || (!g_kiParticles && !g_kiGlow)) {
         s_key_particles.clear();
         std::fill(std::begin(s_part_was), std::end(s_part_was), false);
         std::fill(std::begin(s_part_want), std::end(s_part_want), false);
@@ -895,6 +946,12 @@ static void key_particles()
         // fires while off never burst once it's back on
         for (int id = 0; id < LBL_COUNT; ++id)
             s_part_fired[id] = part_fired(id);
+        return;
+    }
+    if (!g_kiParticles) {
+        s_key_particles.clear();
+        std::fill(std::begin(s_part_want), std::end(s_part_want), false);
+        std::fill(std::begin(s_part_seen), std::end(s_part_seen), false);
         return;
     }
 
@@ -1566,8 +1623,10 @@ static void keybind_indicators(const MvInd_t& s)
     if (!font)
         return;
 
-    if (g_kiParticles)
+    if (g_kiParticles || g_kiGlow)
         part_track(pending, real_time());
+    if (g_kiGlow)
+        key_glow(font, fs, real_time());
 
     if (style != IND_STYLE_SMOOTH)
         s_smooth_tags.clear();

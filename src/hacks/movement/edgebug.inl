@@ -951,6 +951,7 @@ static void EbPlaySound(int idx, const char* custom, float vol = 1.f)
     if (idx >= 1 && idx <= 4) path = kEbSounds[idx - 1];
     else if (idx == 5) path = (custom && custom[0]) ? custom : nullptr;
     if (!path) return;
+    if (idx == 5 && CustomSound_Play(path, vol)) return;   // C:\botox-css\sounds\<file>.wav
     PlaySoundVol(path, vol);
 }
 

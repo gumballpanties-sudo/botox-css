@@ -225,6 +225,15 @@ void UnitB_Menu_movement_indicators()
                 ImGui::SliderFloat("cooldown##key particles", &g_kiParticleCooldown, 0.f, 2.f, "%.2f s");
             }
 
+            ImGui::Checkbox("detection glow", &g_kiGlow);
+            if (g_kiGlow)
+            {
+                ImGui::ColorRow("glow color##key glow", g_kiGlowColor);
+                ImGui::SliderFloat("blur##key glow", &g_kiGlowBlur, 2.f, 30.f, "%.1f");
+                ImGui::SliderInt("strength##key glow", &g_kiGlowStrength, 1, 4);
+                ImGui::SliderFloat("life##key glow", &g_kiGlowLife, 0.1f, 3.f, "%.1f s");
+            }
+
             ImGui::SliderInt("position##sub indicators", &g_kiPosition, 30, (int)screen.y);
 
             ImGui::MultiCombo("displayed keybinds", &g_kiShow, kKiToggleNames, KI_COUNT);

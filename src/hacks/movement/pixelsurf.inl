@@ -29,6 +29,7 @@ static void PsPlaySound(int idx, const char* custom)
     if (idx >= 1 && idx <= 4) path = kPsSounds[idx - 1];
     else if (idx == 5) path = (custom && custom[0]) ? custom : nullptr;
     if (!path) return;
+    if (idx == 5 && CustomSound_Play(path, g_psSoundVolume)) return;   // C:\botox-css\sounds\<file>.wav
     PlaySoundVol(path, g_psSoundVolume);   // edgebug.inl, playvol
 }
 

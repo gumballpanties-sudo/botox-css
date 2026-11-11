@@ -38,6 +38,7 @@
 #include "../misc/names.h"         // custom names: cycle lists + misc > player list (aliases)
 #include "../misc/game_pure.h"     // n_game::SplitCvars -- cvars "add" splits on ';'
 #include "../screen/blur_rect.h"   // BlurRectFade -- settings "background blur"
+#include "../misc/custom_sound.h"  // SOUNDS_DIR -- custom sound picker
 
 void MenuTooltip(const char* fmt, ...);
 ImU32 BlendU32(const ImVec4& a, const ImVec4& b, float t);
@@ -51,6 +52,28 @@ void MenuClientCmd(const char* cmd);
 bool IconButton(const char* id, const int icon, const float height);
 void SafeCheckbox(const char* label, bool* v);
 void ConvenienceButtons();
+
+// custom sound pick: lists *.wav in C:\botox-css\sounds (folder made on open, rescanned while open)
+inline void SoundFileCombo(const char* label, char* buf, size_t sz)
+{
+    if (!ImGui::BeginCombo(label, buf[0] ? buf : "drop .wav in C:\\botox-css\\sounds")) return;
+    CreateDirectoryA("C:\\botox-css", nullptr);
+    CreateDirectoryA(SOUNDS_DIR, nullptr);
+    WIN32_FIND_DATAA fd;
+    char pat[MAX_PATH]; snprintf(pat, sizeof(pat), "%s\\*.wav", SOUNDS_DIR);
+    HANDLE h = FindFirstFileA(pat, &fd);
+    if (h == INVALID_HANDLE_VALUE) ImGui::TextDisabled("no .wav files");
+    else
+    {
+        do
+            if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && ImGui::Selectable(fd.cFileName, !strcmp(buf, fd.cFileName)))
+                strncpy_s(buf, sz, fd.cFileName, _TRUNCATE);
+        while (FindNextFileA(h, &fd));
+        FindClose(h);
+    }
+    if (ImGui::Selectable("open folder")) ShellExecuteA(nullptr, "open", SOUNDS_DIR, nullptr, nullptr, SW_SHOWNORMAL);
+    ImGui::EndCombo();
+}
 
 // tab roots + their page state (sidebar flyout in menu.cpp)
 extern const char* kVisualsSub[3]; extern int s_visualsSub; void Tab_VisualsRoot();

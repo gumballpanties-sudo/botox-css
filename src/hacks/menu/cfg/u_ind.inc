@@ -100,6 +100,11 @@
     { "kiParticleGravity", CfgEntry::FLOAT, &g_kiParticleGravity, 0 },
     { "kiParticleLife",   CfgEntry::FLOAT,  &g_kiParticleLife, 0 },
     { "kiParticleCooldown", CfgEntry::FLOAT, &g_kiParticleCooldown, 0 },
+    { "kiGlow",           CfgEntry::BOOL,   &g_kiGlow, 0 },
+    { "kiGlowColor",      CfgEntry::FLOAT4, g_kiGlowColor, 0 },
+    { "kiGlowBlur",       CfgEntry::FLOAT,  &g_kiGlowBlur, 0 },
+    { "kiGlowStrength",   CfgEntry::INT,    &g_kiGlowStrength, 0 },
+    { "kiGlowLife",       CfgEntry::FLOAT,  &g_kiGlowLife, 0 },
     { "kiPosition",       CfgEntry::INT,    &g_kiPosition, 0 },
     { "kiShow",           CfgEntry::INT,    &g_kiShow, 0 },
     // custom labels keyed by the stock label, so a row added later never shifts a saved one

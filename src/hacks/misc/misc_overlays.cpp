@@ -2,6 +2,7 @@
 #include "names.h"                     // Names_IsReviveTarget (auto revive modes 2/3)
 #include "../movement/prediction.h"   // TickInterval
 #include "../../render/dpi.h"          // botox logger: queued stretch block (dpi scale panels)
+#include "custom_sound.h"              // hit sound custom: C:\botox-css\sounds
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -149,6 +150,7 @@ void HitSound_Trigger()
     if (g_hitSoundType >= 0 && g_hitSoundType <= 3) path = kStock[g_hitSoundType];
     else if (g_hitSoundType == 4) path = g_hitSoundCustom[0] ? g_hitSoundCustom : nullptr;
     if (!path) return;
+    if (g_hitSoundType == 4 && CustomSound_Play(path, g_hitSoundVolume)) return;   // C:\botox-css\sounds\<file>.wav
     // "playvol <sound> <vol>" (CSS engine.dll console cmd), stacked per 1.0 like botox emit_ambient_sound
     for (float left = std::clamp(g_hitSoundVolume, 0.f, 2.f); left > 0.001f; left -= 1.f)
     {

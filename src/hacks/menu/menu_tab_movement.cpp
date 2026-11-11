@@ -225,7 +225,7 @@ static void Page_MovementMain()
                 }
                 ImGui::Combo("detection sound##ebsound", &g_edgeBugSoundMode, "none\0arena switch\0button\0money\0beep\0custom\0");
                 if (g_edgeBugSoundMode == 5)
-                    ImGui::InputTextWithHint("sound path##ebsndpath", "sound/weapons/myhit.wav", g_edgeBugSoundCustom, sizeof(g_edgeBugSoundCustom));
+                    SoundFileCombo("sound file##ebsndpath", g_edgeBugSoundCustom, sizeof(g_edgeBugSoundCustom));
                 if (g_edgeBugSoundMode > 0)
                     SliderF("sound volume##ebsndvol", &g_edgeBugSoundVolume, 0.f, 2.f, "%.2f");
                 if (style == 0)
@@ -261,7 +261,7 @@ static void Page_MovementMain()
 
                 ImGui::Combo("detection sound##essound", &g_edgeSkipSoundMode, "none\0arena switch\0button\0money\0beep\0custom\0");
                 if (g_edgeSkipSoundMode == 5)
-                    ImGui::InputTextWithHint("sound path##essndpath", "sound/weapons/myhit.wav", g_edgeSkipSoundCustom, sizeof(g_edgeSkipSoundCustom));
+                    SoundFileCombo("sound file##essndpath", g_edgeSkipSoundCustom, sizeof(g_edgeSkipSoundCustom));
                 if (g_edgeSkipSoundMode > 0)
                     SliderF("sound volume##essndvol", &g_edgeSkipSoundVolume, 0.f, 2.f, "%.2f");
 
@@ -279,7 +279,7 @@ static void Page_MovementMain()
                 ImGui::Checkbox("strafe into wall##pswallstrafe", &g_pixelSurfWallStrafe);
                 ImGui::Combo("detection sound##pssound", &g_psSound, "none\0arena switch\0button\0money\0beep\0custom\0");
                 if (g_psSound == 5)
-                    ImGui::InputTextWithHint("sound path##pssndpath", "sound/weapons/myhit.wav", g_psSoundCustom, sizeof(g_psSoundCustom));
+                    SoundFileCombo("sound file##pssndpath", g_psSoundCustom, sizeof(g_psSoundCustom));
                 if (g_psSound > 0)
                     SliderF("sound volume##pssndvol", &g_psSoundVolume, 0.f, 2.f, "%.2f");
             }, ImVec2(220.f, -1));
@@ -369,7 +369,7 @@ static void Page_MovementMain()
                 ImGui::Checkbox("wallstrafe##tbws", &g_tbWallstrafeOpt);
                 ImGui::Combo("detection sound##tbsound", &g_tbSound, "none\0arena switch\0button\0money\0beep\0custom\0");
                 if (g_tbSound == 5)
-                    ImGui::InputTextWithHint("sound path##tbsndpath", "sound/weapons/myhit.wav", g_tbSoundCustom, sizeof(g_tbSoundCustom));
+                    SoundFileCombo("sound file##tbsndpath", g_tbSoundCustom, sizeof(g_tbSoundCustom));
                 if (g_tbSound > 0)
                     SliderF("sound volume##tbsndvol", &g_tbSoundVolume, 0.f, 2.f, "%.2f");
             }, ImVec2(220.f, -1));

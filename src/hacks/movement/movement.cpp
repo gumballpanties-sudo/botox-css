@@ -27,6 +27,7 @@
 #include "../web/websurface.h"       // Web_BlockFire
 #include "../aim/css_bridge.h"       // CssBridge_SetFakePov (fake pov in demos -> AIMTAB's engine hook)
 #include "../botoxnet/botoxnet.h"    // g_botox_net.on_create_move
+#include "../misc/custom_sound.h"    // custom trick sounds off C:\botox-css\sounds
 #include <mutex>
 #include <atomic>
 #include <thread>
