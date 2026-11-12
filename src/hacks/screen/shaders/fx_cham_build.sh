@@ -4,7 +4,7 @@
 # FXC=... overrides the compiler; otherwise the newest Windows Kits fxc is used.
 set -euo pipefail
 
-COUNT=24                            # ChamsLayers::Count (chams_layers.h)
+COUNT=25                            # ChamsLayers::Count (chams_layers.h)
 SKIP=" 0 12 13 "                    # original / lsd / two tone: not shader chams modes
 
 if [ -z "${FXC:-}" ]; then

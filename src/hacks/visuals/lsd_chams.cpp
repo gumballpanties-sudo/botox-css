@@ -472,7 +472,7 @@ namespace
 			return o_DIP(dev, type, base, minV, nV, start, prims);
 
 		const bool additive = ChamAdditive(s_chMode);
-		const bool blends = additive || s_chColor[3] < 1.f || s_chMode == ChamsLayers::Crystal || s_chMode == ChamsLayers::Network;
+		const bool blends = additive || s_chColor[3] < 1.f || s_chMode == ChamsLayers::Crystal || s_chMode == ChamsLayers::Network || s_chMode == ChamsLayers::Grid;
 
 		IDirect3DVertexShader9* oldVs = nullptr;
 		IDirect3DPixelShader9* oldPs = nullptr;

@@ -2,7 +2,7 @@
 // rebuilt by fx_cham_build.sh. Every look is computed here (no engine envmap / phong / bump), so it is the
 // same at every graphics setting. Modes 14..23 are Atlas-TF2 base/render/shaders/model.hlsl 1:1
 // (g_color = cColor, g_time = cTime.x). 1..11 = botox's material looks redone in shader: procedural env
-// instead of cubemaps, camera key light instead of map lights.
+// instead of cubemaps, camera key light instead of map lights. 24 = botox grid.
 // c40 colour (display, alpha pre-scaled), c41 x = time (realtime mod 1024). s0 = carrier basetexture.
 float4 cColor : register( c40 );
 float4 cTime : register( c41 );
@@ -248,6 +248,12 @@ float4 main( PS_INPUT i ) : COLOR
 	const float  gloss  = smoothstep( 0.80f, 0.88f, dot( unit, normalize( normalize( eye ) + float3( 0.0f, 0.0f, 1.1f ) ) ) ) * 0.3f;
 	const float  glow   = smoothstep( 0.55f, 0.72f, cloud ) * above * 0.45f + gloss;
 	return aero( lerp( grass, air, above ) * cColor.rgb * 1.2f, glow, 1.0f - facing );
+#elif MODE == 24   // grid: 4 unit bind pose cells (position, not uv: ride the bones), 3 plane families = rings + stripes on every limb
+	const float3 p     = model / 4.0f;
+	const float3 dist  = abs( frac( p - 0.5f ) - 0.5f ) / max( fwidth( p ) * 1.5f, 1e-5f );   // 1.5 px lines at any angle / range
+	const float3 flat_ = pow( abs( unit ), 16.0f ) * 4.0f;                                     // only a face lying IN a plane is muted (would light whole)
+	const float  line_ = saturate( 1.0f - min( min( dist.x + flat_.x, dist.y + flat_.y ), dist.z + flat_.z ) );
+	return float4( cColor.rgb, cColor.a * line_ );
 #else
 	return cColor;
 #endif
