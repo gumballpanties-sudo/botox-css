@@ -51,9 +51,10 @@ inline float VmCs_Approach(float target, float value, float speed)
 
 // speed2d = |velocity.xy|, maxSpeed <= 0 = no weapon (CS:GO fixed 150 path)
 // rawVert/rawLat = BobState m_flRawVerticalBob/m_flRawLateralBob (pre-clamp), read by cs_hud_scope.cpp
+// gunAccPos = VmCs_AccShift result (CS:GO m_flGunAccuracyPosition), 0 = no shift
 inline void VmCs_CalcBob(VmBobState& s, float speed, bool onGround, float maxSpeed,
                          float curtime, float frametime, const VmCsBobCfg& c,
-                         float* rawVert = nullptr, float* rawLat = nullptr)
+                         float* rawVert = nullptr, float* rawLat = nullptr, float gunAccPos = 0.f)
 {
     if (!frametime) return;   // "just use old value"
 
@@ -79,7 +80,7 @@ inline void VmCs_CalcBob(VmBobState& s, float speed, bool onGround, float maxSpe
     s.lastBobTime = curtime;
 
     float flBobCycle;
-    const float flGunAccPos = 0.f;
+    const float flGunAccPos = gunAccPos;
     if (maxSpeed > 0.f)
     {
         flRunAddAmt *= 1.f;   // GetRunBobScale
@@ -115,6 +116,31 @@ inline void VmCs_CalcBob(VmBobState& s, float speed, bool onGround, float maxSpe
     s.lat = (float)(s.lat * 0.3 + s.lat * 0.7 * std::sin((double)cycle));
     if (rawLat) *rawLat = s.lat;
     s.lat = VmCs_Clamp(s.lat + flGunAccPos * 0.25f, -8.f, 8.f);
+}
+
+// CS:GO accuracy shift, weapon_csbase.cpp:3393-3440 1:1. acc = GetInaccuracy (or crouch base when
+// ducked), standBase = GetInaccuracyStand. valid=false (reload / elites / no weapon) -> eases to 0.
+// Returns m_flGunAccuracyPosition: < 0 = left (more accurate than standing), > 0 = right.
+struct VmCsShift { float pos = 0.f; };
+inline float VmCs_AccShift(VmCsShift& st, bool valid, float acc, float standBase, bool sniper,
+                           float leftAmt, float rightAmt, float frametime)
+{
+    float diff = 0.f;
+    if (valid)
+    {
+        float mult = 1.f;
+        if (acc < standBase) mult = (sniper ? 0.15f : 18.f) * leftAmt;
+        else
+        {
+            if (acc > 0.082f) acc = 0.082f;
+            mult *= rightAmt;
+        }
+        diff = (acc - standBase) * mult;
+        if (diff < -0.1f) diff = -0.1f;
+    }
+    const float target = diff * 80.f;
+    st.pos = VmCs_Approach(target, st.pos, std::fabs((target - st.pos) * frametime) * 4.f);
+    return st.pos;
 }
 
 // TF runs the calc TWICE per frame for the off-hand viewmodel (index 1): once through the

@@ -72,9 +72,11 @@ extern R_DrawSkyBox_t o_R_DrawSkyBox;
 void __fastcall h_R_DrawSkyBox(float zFar, int nDrawFlags);
 
 // -- Viewmodel offset hook ---------------------------------------------------------------------
-using CalcViewModelView_t = void(__fastcall*)(void*, void*, void*, void*);
+// C_BasePlayer::CalcViewModelView(this=player, eyeOrigin, eyeAngles), client.dll 0x54790 -- NOT the
+// 4-arg C_BaseViewModel one (that is vm vt[212], called from here per vm). Disasm-verified 11-12.
+using CalcViewModelView_t = void(__fastcall*)(void*, void*, void*);
 extern CalcViewModelView_t o_CalcViewModelView;
-void __fastcall h_CalcViewModelView(void* rcx, void* owner, void* pEyePosition, void* pEyeAngles);
+void __fastcall h_CalcViewModelView(void* player, void* pEyePosition, void* pEyeAngles);
 void VmCsgo_Install(HMODULE client);   // CS:GO bob hook (vm_csgo_hook.inl)
 
 // -- Weather -----------------------------------------------------------------------------------

@@ -404,45 +404,45 @@ __declspec(noinline) static bool CalcViewModel_ApplyOffset(const void* pEyePosit
     return true;
 }
 
-// CBasePlayer::CalcViewModelView loops MAX_VIEWMODELS(2) and hands EVERY viewmodel the
-// SAME `const Vector& eyeOrigin` -- view.cpp's own local. Offsetting in place therefore
-// leaked into the next iteration: vm0 (weapon) moved 1x, vm1 moved 2x. Spy's watch is
-// vm1 (tf_weapon_invis.cpp: SetViewModelIndex(1)), so the watch drifted off the weapon --
-// same for grenade/offhand v_models. Offset a COPY, pass the copy: one shift each, equal.
-void __fastcall h_CalcViewModelView(void* rcx, void* owner, void* pEyePosition, void* pEyeAngles)
+// CSS sig hits C_BasePlayer::CalcViewModelView (player, eyeOrigin, eyeAngles), which loops
+// MAX_VIEWMODELS(2) and hands each vm the same origin/angles (baseplayer_shared.cpp:1570).
+// 11-12 fix: hook was typed as the 4-arg C_BaseViewModel version -> "owner" was &eyeOrigin,
+// eye was read from &eyeAngles, angles from stale r9 = every vm feature silently dead.
+// Offset a COPY, pass the copy: never write the caller's Vector.
+void __fastcall h_CalcViewModelView(void* player, void* pEyePosition, void* pEyeAngles)
 {
-    if (g_eject) { o_CalcViewModelView(rcx, owner, pEyePosition, pEyeAngles); return; }
+    if (g_eject) { o_CalcViewModelView(player, pEyePosition, pEyeAngles); return; }
     // ItemPostFrame (baseplayer_shared.cpp:233) calls this every predicted usercmd. Base skips bob
     // there (baseviewmodel_shared.cpp:398); stepping ours on tickbase curtime + old velocities
     // made the render frame reuse it = vm jitters up/down at tick rate. Render call only.
     if (g_prediction && reinterpret_cast<const unsigned char*>(g_prediction)[kPredOff_InPrediction])
-    { o_CalcViewModelView(rcx, owner, pEyePosition, pEyeAngles); return; }
+    { o_CalcViewModelView(player, pEyePosition, pEyeAngles); return; }
     ++g_miscHookDepth;
     struct Dec { ~Dec() { --g_miscHookDepth; } } _dec;
 
     // Round-3: no longer gated on o_VmCsBobHelper -- that hook targets TF2's compiled
     // CalcViewModelBobHelper, which doesn't exist in CS:S's client.dll (see vm_csgo_hook.inl
     // banner). Bob/lower/dip/shift are all computed inside VmCs_EyeAdjustSafe now, hook-free.
-    const bool csAdjust = g_vmCsGunLower || g_vmCsLandDip || (g_vmCsBob && !g_vmRemoveBob) ||
-                          g_wdVmShiftLeft > 0.f || g_wdVmShiftRight > 0.f;
+    // shift sliders ride inside bob (CS:GO flGunAccPos), so they don't arm this on their own
+    const bool csAdjust = g_vmCsGunLower || g_vmCsLandDip || (g_vmCsBob && !g_vmRemoveBob);
     if ((g_vmOffsetEnable || csAdjust) && pEyePosition && pEyeAngles)
     {
         // CS:GO order: pitch/dip on the eye first, then the offset along the adjusted angles
         float eye[3], ang[3];
         if (CalcViewModel_Copy(pEyePosition, pEyeAngles, eye, ang))
         {
-            if (csAdjust) VmCs_EyeAdjustSafe(owner, eye, ang);
+            if (csAdjust) VmCs_EyeAdjustSafe(player, eye, ang);
             if (g_vmOffsetEnable) ang[2] += g_wdVmRoll;   // botox viewmodel_offset roll: the copy only
             float moved[3] = { eye[0], eye[1], eye[2] };
             if (!g_vmOffsetEnable || CalcViewModel_ApplyOffset(eye, ang, moved))
             {
-                o_CalcViewModelView(rcx, owner, moved, ang);
+                o_CalcViewModelView(player, moved, ang);
                 return;
             }
         }
     }
 
-    o_CalcViewModelView(rcx, owner, pEyePosition, pEyeAngles);
+    o_CalcViewModelView(player, pEyePosition, pEyeAngles);
 }
 
 // ==== No hats ============================================================================

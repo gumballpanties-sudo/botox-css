@@ -151,6 +151,7 @@ const char* CssBridge_GetLastPlace(int ent);           // CBasePlayer::m_szLastP
 int   CssBridge_GetButtons(int ent);                   // local player only, else 0
 float CssBridge_GetAccuracyPenalty(int weaponEnt);     // m_fAccuracyPenalty, raw read @ +0xcb0 (verified)
 float CssBridge_GetInaccuracy(int weaponEnt);          // GetInaccuracy, vtable slot 382 (disasm-verified)
+bool  CssBridge_ReloadingOrElites(int weaponEnt);      // CS:GO vm accuracy-shift skip (weapon_csbase.cpp:3398)
 bool  CssBridge_IsWeaponBurstMode(int weaponEnt);      // famas/glock only (weapon_famas/glock.cpp)
 bool  CssBridge_IsSniperWeapon(int weaponEnt);         // AWP/SG550/G3SG1/Scout (css_weapons.h CSWeaponIsSniperClass) --
                                                         // CSS-adapted botox awp/ssg08/scar20/g3sg1 gate for crosshair.cpp

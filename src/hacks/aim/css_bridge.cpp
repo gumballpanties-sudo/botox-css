@@ -730,6 +730,12 @@ float CssBridge_GetInaccuracy(int weaponEnt)
 	flPenalty = flOld;
 	return flInaccuracy;
 }
+// CS:GO vm shift gate (weapon_csbase.cpp:3398): no accuracy shift while reloading or on elites
+bool CssBridge_ReloadingOrElites(int weaponEnt)
+{
+	auto w = Wpn(weaponEnt);
+	return !w || w->m_bInReload() || w->GetWeaponID() == WEAPON_ELITE;
+}
 bool CssBridge_IsWeaponBurstMode(int weaponEnt) { auto w = Wpn(weaponEnt); return w && w->IsBurstMode(); }
 
 // ---- net ----

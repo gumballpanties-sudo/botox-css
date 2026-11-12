@@ -298,9 +298,9 @@ static void PollThread()
                 Movement_Install(); // trace/prediction interfaces + sigs (movement port)
             }
 
-            // C_BaseViewModel::CalcViewModelView -- viewmodel offset
+            // C_BasePlayer::CalcViewModelView(eyeOrigin, eyeAngles) -- viewmodel offset/bob/lower/dip.
+            // client.dll 0x54790, 1 hit (cssourcex64 same sig). TF2's C_BaseViewModel sig had 0 hits, dropped.
             static const char* const kCalcVmvSigs[] = {
-                "48 89 74 24 ? 55 41 56 41 57 48 8D AC 24",
                 "48 89 5C 24 ? 48 89 6C 24 ? 48 89 74 24 ? 57 48 83 EC ? 49 8B F0 48 8B EA 48 8B F9 33 DB",
                 nullptr
             };
