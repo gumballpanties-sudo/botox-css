@@ -31,6 +31,8 @@
 #include "../hacks/hud/points.h"
 #include "../hacks/hud/spectator_list.h"
 #include "../hacks/esp/esp_queue.h"  // botox m_draw_data: esp recorded on the game thread, replayed in RenderEspQueue
+#include "../hacks/esp/esp_declutter.h"  // label stacks shoved apart before the replay (EspQ_Declutter)
+#include <unordered_map>
 #include "../hacks/visuals/esp_preview.h"   // EspPreview::DropTexture in h_Reset
 #include "../hacks/aim/esp_weapon_icons.h"   // ESPC_WPNICON resolve (plain globals.h types, aim TU safe)
 #include "../hacks/visuals/player_stencil.h"  // PlayerStencil_ReleaseTargets in h_Reset
@@ -1945,6 +1947,75 @@ void EspQ_ReplayFrame(ImDrawList* dl, const EspFrame& f)
     }
 }
 
+// esp labels try not to overlap, measured here where the font is valid. Two passes:
+//  1. rows: inside each label stack (esp.cpp EspQ::Stack) every row settles clear of the stack's
+//     earlier rows (flag column, below-box rows, weapon icon), real text height, not the recorded
+//     line height
+//  2. stacks: EspDeclutter::Resolve, nearest holds, the rest slide up/down; live frame eases the
+//     shove across frames (ease = true), the esp preview applies it straight.
+// Stack 0 texts / icons are fixed blockers. Name avatar (ESPF_LEFT_OF_TEXT) rides its stack, unmeasured.
+void EspQ_Declutter(EspFrame& f, bool ease)
+{
+    struct Ease { float dy; uint32_t seen; };
+    static std::unordered_map<int, Ease> s_ease;   // live frame only
+    static std::unordered_map<int, float> s_dy;
+    static std::vector<EspDeclutter::Stack> s_stacks;
+    static std::vector<EspDeclutter::Box> s_placed, s_prior;
+    static std::vector<std::pair<int, EspDeclutter::Box>> s_rows;
+    static std::vector<float> s_rowDy;
+    static uint32_t s_frame = 0;
+    s_stacks.clear(); s_placed.clear(); s_rows.clear(); s_dy.clear();
+    s_rowDy.assign(f.cmds.size(), 0.f);
+    ImFont* font = s_fontEsp ? s_fontEsp : ImGui::GetFont();
+    for (size_t i = 0; i < f.cmds.size(); i++)
+    {
+        const EspCmd& c = f.cmds[i];
+        EspDeclutter::Box b;
+        if (c.type == ESPC_TEXT)
+        {
+            const ImVec2 sz = font->CalcTextSizeA(font->FontSize, FLT_MAX, 0.f, &f.text[c.p0]);
+            const float l = floorf(c.x0 - sz.x * c.ax), t = floorf(c.y0 - sz.y * c.ay);
+            b = { l - 1.f, t, l + sz.x + 1.f, t + sz.y + 1.f };   // + shadow px
+        }
+        else if (c.type == ESPC_WPNICON || (c.type == ESPC_AVATAR && c.stack && !(c.flags & ESPF_LEFT_OF_TEXT)))
+            b = { c.x0, c.y0, c.x1, c.y1 };
+        else
+            continue;
+        if (!c.stack) { s_placed.push_back(b); continue; }
+        s_prior.clear();
+        for (const auto& r : s_rows)
+            if (r.first == c.stack) s_prior.push_back(r.second);
+        const float dy = EspDeclutter::Settle(s_prior, b, c.stackUp);
+        s_rowDy[i] = dy;
+        b.t += dy; b.b += dy;
+        s_rows.push_back({ c.stack, b });
+        EspDeclutter::Add(s_stacks, c.stack, c.stackUp, c.stackPrio, b);
+    }
+    if (ease) ++s_frame;
+    if (s_stacks.empty()) { if (ease) s_ease.clear(); return; }
+    // ponytail: fixed 6-line reach; past it a label stays overlapped instead of flying off its box
+    EspDeclutter::Resolve(s_stacks, s_placed, font->FontSize * 6.f);
+    const float dt = ImGui::GetIO().DeltaTime;
+    for (const auto& k : s_stacks)
+    {
+        if (!ease) { s_dy[k.key] = k.dy; continue; }
+        auto it = s_ease.find(k.key);
+        if (it == s_ease.end()) it = s_ease.emplace(k.key, Ease{ k.dy, s_frame }).first;   // new label: no slide in
+        else it->second = { EspDeclutter::Ease(it->second.dy, k.dy, dt), s_frame };
+        s_dy[k.key] = it->second.dy;
+    }
+    if (ease) std::erase_if(s_ease, [](const auto& e) { return e.second.seen != s_frame; });
+    for (size_t i = 0; i < f.cmds.size(); i++)
+    {
+        EspCmd& c = f.cmds[i];
+        if (!c.stack) continue;
+        const auto it = s_dy.find(c.stack);
+        const float dy = roundf(s_rowDy[i] + (it != s_dy.end() ? it->second : 0.f));
+        if (c.type == ESPC_TEXT) c.y0 += dy;
+        else if (c.type == ESPC_AVATAR || c.type == ESPC_WPNICON) { c.y0 += dy; c.y1 += dy; }
+    }
+}
+
 static void RenderEspQueue()
 {
     ImDrawList* dl = ImGui::GetBackgroundDrawList();
@@ -1967,6 +2038,7 @@ static void RenderEspQueue()
             f.srcW, f.srcH, io.DisplaySize.x, io.DisplaySize.y, sx, sy);
     }
     const int firstVtx = dl->VtxBuffer.Size;
+    EspQ_Declutter(f, true);
     EspQ_ReplayFrame(dl, f);
     if (fabsf(sx - 1.f) > 1e-3f || fabsf(sy - 1.f) > 1e-3f)
         for (int i = firstVtx; i < dl->VtxBuffer.Size; ++i)

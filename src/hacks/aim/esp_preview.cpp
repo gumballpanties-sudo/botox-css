@@ -651,6 +651,7 @@ namespace
 			p.m_healthFactor = 0.76f;
 			p.m_visible = true;
 			p.m_distance = kDistance;
+			p.m_index = 1;   // any non-zero: labels get stacks, so the preview shows the declutter too
 			p.m_steamId = g_espAvatar ? LocalSteamId() : 0;   // CS:S bots have no portrait: your own avatar
 			p.m_weaponId = WEAPON_AK47;
 			p.m_hasAmmo = g_espAmmoBar;
@@ -741,7 +742,10 @@ void EspPreview::DrawBody()
 			// esp is laid out on 0..kWidth: emit unclipped (text culls on the clip rect), then move it onto the body and clip there
 			dl->PushClipRect(ImVec2(-100000.f, -100000.f), ImVec2(100000.f, 100000.f), false);
 			const int firstVertex = dl->VtxBuffer.Size, firstCommand = dl->CmdBuffer.Size - 1;
-			EspQ_ReplayFrame(dl, s_espShown);
+			static EspFrame laid;   // declutter a copy: s_espShown is kept across frames, shifting it would stack up
+			laid.cmds = s_espShown.cmds; laid.pts = s_espShown.pts; laid.text = s_espShown.text;
+			EspQ_Declutter(laid, false);
+			EspQ_ReplayFrame(dl, laid);
 			for (int i = firstVertex; i < dl->VtxBuffer.Size; i++)
 				dl->VtxBuffer[i].pos.x += pos.x, dl->VtxBuffer[i].pos.y += pos.y;
 			for (int i = firstCommand; i < dl->CmdBuffer.Size; i++)

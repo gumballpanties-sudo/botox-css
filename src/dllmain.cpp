@@ -673,6 +673,7 @@ bool g_blockBot = false;   int g_blockBotKey = 0;   int g_blockBotMode = 1;
 
 // fake movement DELETED (11-03/11-04 tabs round): no botox csgo equivalent, see globals.h note
 bool g_fmWallbugFix = false;  // 11-11: local server only, CSS x64 ClipVelocity bandaid off (movement.cpp)
+bool g_fmNoFallDamage = false; // 11-11: local server only, FlPlayerFallDamage -> 0 (movement.cpp)
 float g_asExtraReach = 4.f;  // botox m_air_stuck_extra_reach
 float g_asBudget = 50.f;     // botox m_air_stuck_budget (percent of a tick, botox slider 5-90)
 bool g_asMovementFix = true;    // botox m_movement_fix (air_stuck.cpp:168 -- off forces view+move onto cmd)

@@ -496,6 +496,30 @@ static bool s_searchFocus = false;
 
 // botox search box: tab-sized, sits above the tabs. Draw-list only (no item), keys read off
 // the imgui input queue while focused.
+// csgo menu.cpp gamesense_frame: 6 px frame outside the window (12 / 60 / 40 x3 / 60), 2 px bar over the band's
+// top edge = majorkahook g_color1..3 (37b1da -> cc46cd -> cce335), second row same rgb at half alpha
+static void GamesenseFrame(ImDrawList* dl, const ImVec2& pos, const ImVec2& size)
+{
+    static constexpr int kLayers[6] = { 12, 60, 40, 40, 40, 60 };
+    const ImVec2 max(pos.x + size.x, pos.y + size.y);
+    dl->PushClipRect(ImVec2(pos.x - 6.f, pos.y - 6.f), ImVec2(max.x + 6.f, max.y + 6.f), false);
+    for (int i = 0; i < 6; i++)
+    {
+        const float o = 6.f - (float)i;
+        dl->AddRect(ImVec2(pos.x - o, pos.y - o), ImVec2(max.x + o, max.y + o), IM_COL32(kLayers[i], kLayers[i], kLayers[i], 255));
+    }
+    const float mid = ImFloor(pos.x + size.x / 2.f);
+    for (int row = 0; row < 2; row++)
+    {
+        const int a = row ? 128 : 255;
+        const float y = pos.y + 1.f + (float)row;
+        const ImU32 c1 = IM_COL32(55, 177, 218, a), c2 = IM_COL32(204, 70, 205, a), c3 = IM_COL32(204, 227, 53, a);
+        dl->AddRectFilledMultiColor(ImVec2(pos.x + 1.f, y), ImVec2(mid, y + 1.f), c1, c2, c2, c1);
+        dl->AddRectFilledMultiColor(ImVec2(mid, y), ImVec2(max.x - 1.f, y + 1.f), c2, c3, c3, c2);
+    }
+    dl->PopClipRect();
+}
+
 static void SearchBox(float x, float& topY, bool canClick, float dt)
 {
     ImDrawList* dl = ImGui::GetWindowDrawList();
@@ -872,6 +896,7 @@ void RenderMenu()
     dl->AddRect(wp, ImVec2(wp.x + wz.x, wp.y + wz.y), kWindowBorder(), rnd);
     dl->PopClipRect();
     RenderFadedGradientLine(dl, ImVec2(wp.x, botY), ImVec2(wz.x, 1.f), ImColor(Accent()));
+    if (MenuStyleGamesense(g_menuStyle)) GamesenseFrame(dl, wp, wz);
 
     // ---- title: "botox" bold white, then " | <date>" regular accent, same baseline,
     // centred as one unit in the top band.

@@ -154,6 +154,24 @@ void UnitD_Menu_visuals_world()
     WdModulationRow("prop modulation", &g_propTintEnable, g_propTintColor, &g_wdPropModBright);
     WdModulationRow("skybox modulation", &g_wdSkyMod, g_wdSkyModColor, &g_wdSkyModBright);
 
+    // lamp static props get coloured dlights, light glow / bloom sprites the same colour (modulation walk)
+    ImGui::Checkbox("lighting modulation", &g_wdLightMod);
+    if (g_wdLightMod) {
+        ImGui::OptionPopup("lighting modulation settings", [&]() {
+            ImGui::ColorRow("color##lighting modulation", g_wdLightModColor, kWdPickerNoAlpha);
+            ImGui::Checkbox("lamp lights##lighting modulation", &g_wdLightModLamps);
+            if (g_wdLightModLamps) {
+                ImGui::SliderInt("intensity##lighting modulation", &g_wdLightModIntensity, 0, 10, "%d", ImGuiSliderFlags_AlwaysClamp);
+                ImGui::SliderFloat("radius##lighting modulation", &g_wdLightModRadius, 25.f, 1000.f, "%.0f u", ImGuiSliderFlags_AlwaysClamp);
+                ImGui::SliderInt("max lights##lighting modulation", &g_wdLightModMax, 1, 16, "%d", ImGuiSliderFlags_AlwaysClamp);
+                ImGui::SliderFloat("max distance##lighting modulation", &g_wdLightModDist, 100.f, 8000.f, "%.0f u", ImGuiSliderFlags_AlwaysClamp);
+            }
+            ImGui::Checkbox("light glows##lighting modulation", &g_wdLightModGlows);
+            if (g_wdLightModGlows)
+                ImGui::SliderFloat("glow brightness##lighting modulation", &g_wdLightModGlowBright, 0.f, 400.f, "%.0f%%", ImGuiSliderFlags_AlwaysClamp);
+        }, ImVec2(220.f, -1.f));
+    }
+
     // botox commits a custom path only when the box is left (IsItemDeactivatedAfterEdit), so a
     // half-typed name never reaches the material walk
     constexpr auto presetLabel = [](void*, int i, const char** out) { *out = wfx3::k_texPresets[i].label; return true; };
@@ -196,6 +214,9 @@ void UnitD_Menu_visuals_world()
                 customBox("##prop custom", s_edit, sizeof(s_edit), g_wdPropTexCustom, sizeof(g_wdPropTexCustom));
         }, ImVec2(220.f, -1.f));
     }
+
+    // every world material's base texture -> one pixel of its own colour (wins over world texture)
+    ImGui::Checkbox("flat textures", &g_wdFlatTex);
 
     ImGui::Checkbox("bullet tracers", &g_wdTracers);
     if (g_wdTracers) {

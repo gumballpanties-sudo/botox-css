@@ -729,6 +729,7 @@ extern bool g_blockBot;    extern int g_blockBotKey;    extern int g_blockBotMod
 // stay declared because src/hooks/thread.cpp:535 and src/hooks/fsn.cpp:41 call them (not mine
 // to edit) -- now no-op stubs defined in movement.cpp, see report NEEDS FROM OTHERS.
 extern bool g_fmWallbugFix;       // 11-11: loopback host -> ClipVelocity bandaid (max + 1/32 push) patched out
+extern bool g_fmNoFallDamage;     // 11-11: loopback host -> server.dll FlPlayerFallDamage returns 0
 void FakeMove_Restore();          // eject: ClipVelocity bytes back (movement.cpp)
 void FakeMove_DemoTick();         // no-op stub now (movement.cpp)
 // botox air_stuck knobs (m_air_stuck_extra_reach / m_air_stuck_budget)

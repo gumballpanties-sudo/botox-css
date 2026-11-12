@@ -521,6 +521,7 @@
 "wdDlightBrightness",
 "wdDlightLocal",
 "wdDlightLocalColor",
+"wdFlatTex",
 "wdFlipGunOtherSide",
 "wdHitMarker",
 "wdHitMarkerColor",

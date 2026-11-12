@@ -51,6 +51,9 @@ struct EspCmd
     float    thick = 1.f, round = 0.f, othick = 1.f, ax = 0.f, ay = 0.f;
     int      p0 = 0, pn = 0;      // point pool [p0, p0+pn) as x,y pairs; text: char pool offset
     uint64_t sid = 0;
+    int      stack = 0;           // esp_declutter.h label stack key (0 = fixed); RenderEspQueue shifts y by its offset
+    bool     stackUp = false;     // stack slides up (labels above a box) or down
+    float    stackPrio = 0.f;     // lower = placed first = stays put (distance)
 };
 
 struct EspFrame
@@ -92,9 +95,27 @@ inline uint32_t EspCol(const float* c, float alphaMul = 1.f)
 }
 inline uint32_t EspColRGBA(float r, float g, float b, float a) { const float c[4] = { r, g, b, a }; return EspCol(c); }
 
+inline int   g_espQStack = 0;        // game thread: current EspQ::Stack, stamped on every pushed cmd
+inline bool  g_espQStackUp = false;
+inline float g_espQStackPrio = 0.f;
+
 namespace EspQ
 {
-    inline EspCmd& Push(uint8_t type) { g_espQBuild.cmds.emplace_back(); EspCmd& c = g_espQBuild.cmds.back(); c.type = type; return c; }
+    inline EspCmd& Push(uint8_t type)
+    {
+        g_espQBuild.cmds.emplace_back(); EspCmd& c = g_espQBuild.cmds.back(); c.type = type;
+        c.stack = g_espQStack; c.stackUp = g_espQStackUp; c.stackPrio = g_espQStackPrio;
+        return c;
+    }
+    // scope: everything pushed inside moves as one label stack (esp_declutter.h). key 0 = fixed.
+    struct Stack
+    {
+        int k; bool u; float p;
+        Stack(int key, bool up, float prio) : k(g_espQStack), u(g_espQStackUp), p(g_espQStackPrio)
+        { g_espQStack = key; g_espQStackUp = up; g_espQStackPrio = prio; }
+        ~Stack() { g_espQStack = k; g_espQStackUp = u; g_espQStackPrio = p; }
+        Stack(const Stack&) = delete; Stack& operator=(const Stack&) = delete;
+    };
 
     inline void Line(float x0, float y0, float x1, float y1, uint32_t col, float thick)
     {
@@ -208,3 +229,6 @@ struct ImDrawList;
 // way. No rescale here -- that's RenderEspQueue's engine-pixels-to-ImGui-DisplaySize step, done by
 // its caller, not this.
 void EspQ_ReplayFrame(ImDrawList* dl, const EspFrame& f);
+// render.cpp, render thread: shifts label stacks in f so they don't overlap (esp_declutter.h).
+// ease = live frame (offsets glide across frames); false = esp preview (applied straight, no state).
+void EspQ_Declutter(EspFrame& f, bool ease);

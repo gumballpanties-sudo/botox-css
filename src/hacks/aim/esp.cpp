@@ -213,8 +213,13 @@ namespace
 		float pad[4] = {};   // e_padding_direction: left, top, right, bottom
 		float round = 0.f;
 		Vec3 vOrigin, vMins, vMaxs;
+		int key = 0;          // entindex, 0 = labels fixed (esp_declutter.h)
+		float prio = 0.f;     // distance: nearer labels hold their spot
 	};
 	enum { PAD_LEFT, PAD_TOP, PAD_RIGHT, PAD_BOTTOM };
+	// label stacks per entity: name row, below-box rows, flag column, health number
+	enum { STK_NAME, STK_BOTTOM, STK_FLAGS, STK_HP };
+	int StackKey(const Part& p, int kind) { return p.key ? p.key * 4 + kind : 0; }
 
 	void PartRounding(Part& p, bool boxOn)   // :747-754
 	{
@@ -288,6 +293,7 @@ namespace
 	// below-the-box text row (health number standalone, weapon name, distance): centred, stacks
 	void PartBottomText(Part& p, const char* s, uint32_t col)
 	{
+		EspQ::Stack _s(StackKey(p, STK_BOTTOM), false, p.prio);
 		EspQ::Text(p.box.l + p.box.w * 0.5f, p.box.b + 2 + p.pad[PAD_BOTTOM], s, col, Black(p.a), 0.5f);
 		p.pad[PAD_BOTTOM] += FontH() + 1.f;
 	}
@@ -307,6 +313,7 @@ namespace
 	struct FlagRow { const char* label; bool alert; };
 	void PartFlags(const Part& p, const FlagRow* rows, int n)   // :1160-1175
 	{
+		EspQ::Stack _s(StackKey(p, STK_FLAGS), false, p.prio);
 		float y = (float)p.box.t;
 		for (int i = 0; i < n; i++)
 		{
@@ -357,6 +364,7 @@ namespace
 			}
 			if (followText)
 			{
+				EspQ::Stack _s(StackKey(p, STK_HP), true, p.prio);
 				const auto tip = EspMath::CornerBarTextAnchor(bar, (float)b.l, (float)b.t, (float)b.r, (float)b.b, th, outline, pick);
 				const bool flipX = pick & 1, flipY = pick >= 2;
 				EspQ::Text(tip.x, flipY ? tip.y - h : tip.y, hp, followCol, Black(p.a), flipX ? 0.f : 1.f);
@@ -392,6 +400,7 @@ namespace
 		}
 		if (followText)
 		{
+			EspQ::Stack _s(StackKey(p, STK_HP), true, p.prio);
 			if (vertical)
 				EspQ::Text(side == 1 ? x1 + 2.f : x0 - 2.f, fy0, hp, followCol, Black(p.a), side == 1 ? 0.f : 1.f);
 			else
@@ -671,6 +680,7 @@ void CEsp::DrawPlayers(CCSPlayer* pLocal)
 		player.m_alpha = a;
 		player.m_origin = vOrigin; player.m_mins = pPlayer->m_vecMins(); player.m_maxs = pPlayer->m_vecMaxs();
 		player.m_distance = flDist;
+		player.m_index = iIndex;
 
 		const int iHealth = pPlayer->m_iHealth();
 		const int iMaxHealth = 100;   // CS:S players: fixed 100 max HP, no player-resource lookup needed
@@ -795,6 +805,7 @@ void CEsp::DrawPlayer(const EspPlayer& player)
 
 	Part p;
 	p.box = box; p.a = player.m_alpha; p.vOrigin = player.m_origin; p.vMins = player.m_mins; p.vMaxs = player.m_maxs;
+	p.key = player.m_index; p.prio = player.m_distance;
 	const auto& b = p.box;
 	const float a = player.m_alpha;
 	const uint64_t sid = player.m_steamId;
@@ -807,6 +818,8 @@ void CEsp::DrawPlayer(const EspPlayer& player)
 
 	if (g_espName)
 	{
+		// name below the box = first row of the below-box stack; the name avatar rides with the name
+		EspQ::Stack _s(StackKey(p, g_espNamePosition == 1 ? STK_BOTTOM : STK_NAME), g_espNamePosition == 0, p.prio);
 		const float y = PartName(p, player.m_name, g_espNameVisColors ? (player.m_visible ? g_espNameVisibleColor : g_espNameInvisibleColor) : g_espNameColor);
 		if (sid && g_espAvatarPosition == 0 && !player.m_name.empty())   // an empty name queues no text to sit left of
 		{
@@ -836,6 +849,7 @@ void CEsp::DrawPlayer(const EspPlayer& player)
 	// the esp preview's fake player has one).
 	if (g_espWeaponIcon && player.m_weaponId != WEAPON_NONE)
 	{
+		EspQ::Stack _s(StackKey(p, STK_BOTTOM), false, p.prio);
 		const float cxw = p.box.l + p.box.w * 0.5f, yw = p.box.b + 2 + p.pad[PAD_BOTTOM] + FontH() * 0.5f;
 		EspQ::WeaponIcon(cxw - 6.f, yw - 6.f, cxw + 6.f, yw + 6.f, (int)player.m_weaponId, EspCol(g_espWeaponIconColor, a));
 		p.pad[PAD_BOTTOM] += 13.f;
@@ -925,6 +939,7 @@ void CEsp::DrawPlayer(const EspPlayer& player)
 	{
 		const float size = g_espAvatarSize;
 		const bool below = g_espAvatarPosition == 2;
+		EspQ::Stack _s(StackKey(p, below ? STK_BOTTOM : STK_NAME), !below, p.prio);
 		const float x = b.l + (b.w - size) * 0.5f;
 		const float y = below ? b.b + 2 + p.pad[PAD_BOTTOM] : b.t - 5 - size - p.pad[PAD_TOP];
 		EspQ::Avatar(x, y, x + size, y + size, sid, a, size * 0.5f);

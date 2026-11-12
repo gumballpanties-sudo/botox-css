@@ -2,6 +2,7 @@
 #include "flipworld.h"
 #include "../screen/screenfx.h"   // ScreenFx_FindClientMode
 #include "visuals.h"    // Chams_LevelInit/LevelUnload -- piggybacked on this file's LevelInit hook
+#include "world_fx3.h"  // WorldFx3_LevelShutdown
 #include "../hud/avatar_cache.h"   // unit E5: Avatar_OnMapChange piggybacks the same hook
 #include "../web/websurface.h"     // Web_LevelShutdown
 #include "../botoxnet/botoxnet.h"  // g_botox_net.on_level_init (includes aim/css_bridge.h, legal outside aim)
@@ -565,6 +566,7 @@ static void __fastcall h_FlipLevelShutdown(void* rcx)
         s_flipReady = false;
         FlipRunTick(true);
     }
+    if (OnGameThread()) WorldFx3_LevelShutdown();   // lamp list belongs to the old map
     Chams_LevelUnload();
     Glow_LevelUnload();
     Web_LevelShutdown();   // botox level_shutdown.cpp:27

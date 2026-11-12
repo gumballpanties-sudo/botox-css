@@ -457,6 +457,7 @@ static void Page_MovementMain()
     if (menu_group_begin("fake movement"))
     {
         ImGui::Checkbox("wallbug fix (local server)", &g_fmWallbugFix);
+        ImGui::Checkbox("no fall damage (local server)", &g_fmNoFallDamage);
     }
     menu_group_end();
 
@@ -480,9 +481,6 @@ static void Page_MovementMain()
 
         UnitA_Menu_Nulls();
         UnitA_Menu_HalfSideways();
-
-        ImGui::Checkbox("auto one hop", &g_autoOneHopLadder);
-        ImGui::Keybind("auto one hop key", &g_autoOneHopLadderKey, &g_autoOneHopLadderMode);
 
         // botox :906-907 -- plain checkbox + keybind, no popup
         ImGui::Checkbox("blockbot", &g_blockBot);

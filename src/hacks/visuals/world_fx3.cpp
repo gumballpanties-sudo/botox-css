@@ -9,6 +9,7 @@
 #include <mutex>
 #include <deque>
 #include <unordered_map>
+#include <vector>
 
 using wfx3::V3;
 
@@ -312,26 +313,34 @@ static unsigned char ColByte(float f) { return !(f > 0.f) ? 0 : f >= 1.f ? 255 :
 
 static bool s_dlLit[102] = {};
 
-__declspec(noinline) static void Dlight_Set(int key, const V3* pos, const float* col)
+// CL_AllocDlight memsets a key-matched slot, so every field is written each frame. pos null = kill.
+// die = now + 0.1 with no decay: refreshed every frame, gone 0.1s after the last refresh.
+__declspec(noinline) static void DlightPut(int key, const V3* pos, float radius, const float* col, int exponent)
 {
     if (!s_effects) return;
     __try {
         Wfx3Dlight* l = VCall<Wfx3Dlight*>(s_effects, 4, key);
         if (!l) return;
         if (!pos) { l->radius = 0.f; l->die = -1.f; return; }
-        const float radius = g_dlightRadius < 25.f ? 25.f : (g_dlightRadius > 1000.f ? 1000.f : g_dlightRadius);
-        const int bright = g_wdDlightBrightness < 0 ? 0 : (g_wdDlightBrightness > 10 ? 10 : g_wdDlightBrightness);
         l->flags = 0;
-        l->origin[0] = pos->x; l->origin[1] = pos->y; l->origin[2] = pos->z + 36.f;
+        l->origin[0] = pos->x; l->origin[1] = pos->y; l->origin[2] = pos->z;
         l->radius = radius;
         l->r = ColByte(col[0]); l->g = ColByte(col[1]); l->b = ColByte(col[2]);
-        l->exponent = (signed char)bright;
+        l->exponent = (signed char)(exponent < 0 ? 0 : (exponent > 10 ? 10 : exponent));
         l->die = CurTime() + 0.1f;   // cl time: CL_DecayLights compares die against it
         l->decay = 0.f; l->minlight = 0.f;
         l->key = key; l->style = 0;
         l->direction[0] = l->direction[1] = l->direction[2] = 0.f;
         l->innerAngle = l->outerAngle = 0.f;
     } __except (EXCEPTION_EXECUTE_HANDLER) {}
+}
+
+static void Dlight_Set(int key, const V3* pos, const float* col)
+{
+    if (!pos) { DlightPut(key, nullptr, 0.f, nullptr, 0); return; }
+    const float radius = g_dlightRadius < 25.f ? 25.f : (g_dlightRadius > 1000.f ? 1000.f : g_dlightRadius);
+    const V3 chest{ pos->x, pos->y, pos->z + 36.f };
+    DlightPut(key, &chest, radius, col, g_wdDlightBrightness);
 }
 
 static void Dlight_Frame(void* local, int localIdx)
@@ -357,14 +366,113 @@ static void Dlight_Frame(void* local, int localIdx)
     }
 }
 
+// ==== lighting modulation: dlights on lamp static props (UC "Lighting Modulation (Using dLights)") ====
+// botox-tf2 port. The DrawStaticProps hook only RECORDS lamps (bounds centre, once per prop per map);
+// WorldFx3_Frame lights the nearest g_wdLightModMax: no blink when a lamp leaves view, game dlights
+// never evicted (CL_AllocDlight takes slot 0 when all 32 are busy), no prop pointer read after its draw.
+// IClientRenderable (public/iclientrenderable.h): GetModel 9, GetRenderBoundsWorldspace 21.
+static constexpr int k_lampKeyBase = 0x4C470000;   // clear of player keys 1..101
+static constexpr int k_lampMax     = 1024;
+static std::vector<V3>                         s_lamps;          // this map's lamps, index = key offset
+static std::unordered_map<void*, bool>         s_lampSeen;       // renderable -> recorded (lamp or not)
+static std::unordered_map<const void*, bool>   s_lampModel;      // model_t -> IsLampModel
+static int  s_lampLit[64] = {};
+static int  s_lampLitN    = 0;
+
+__declspec(noinline) static const void* PropModelSEH(void* r)
+{
+    __try { return VCall<const void*>(r, 9); } __except (EXCEPTION_EXECUTE_HANDLER) { return nullptr; }
+}
+__declspec(noinline) static const char* ModelNameSEH(const void* m)
+{
+    if (!g_modelInfo) return nullptr;
+    __try { return VCall<const char*>(g_modelInfo, 3, m); } __except (EXCEPTION_EXECUTE_HANDLER) { return nullptr; }
+}
+__declspec(noinline) static bool PropCenterSEH(void* r, V3& c)
+{
+    float mn[3] = {}, mx[3] = {};
+    __try { VCall<void>(r, 21, mn, mx); } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+    c = { (mn[0] + mx[0]) * 0.5f, (mn[1] + mx[1]) * 0.5f, (mn[2] + mx[2]) * 0.5f };
+    return mx[0] >= mn[0] && mx[1] >= mn[1] && mx[2] >= mn[2] && wfx3::SanePos(c);
+}
+
+// ponytail: one hash lookup per drawn static prop per frame (~1k props = tens of us).
+static void Lamps_Record(void** props, int count)
+{
+    if (s_lamps.size() >= (size_t)k_lampMax) return;
+    for (int i = 0; i < count; ++i) {
+        void* r = props[i];
+        if (!r) continue;
+        auto seen = s_lampSeen.try_emplace(r, false);
+        if (!seen.second) continue;
+        const void* mdl = PropModelSEH(r);
+        if (!mdl) continue;
+        auto lm = s_lampModel.find(mdl);
+        if (lm == s_lampModel.end()) lm = s_lampModel.emplace(mdl, wfx3::IsLampModel(ModelNameSEH(mdl))).first;
+        V3 c;
+        if (!lm->second || !PropCenterSEH(r, c)) continue;
+        seen.first->second = true;
+        s_lamps.push_back(c);
+        if (s_lamps.size() >= (size_t)k_lampMax) break;
+    }
+}
+
+using DrawStaticProps_t = void(__fastcall*)(void*, void**, int, bool, bool);
+static DrawStaticProps_t o_DrawStaticProps = nullptr;
+static void __fastcall h_DrawStaticProps(void* rcx, void** props, int count, bool shadowDepth, bool wireframe)
+{
+    MiscHookGuard _g;
+    if (g_wdLightMod && g_wdLightModLamps && !g_eject && !shadowDepth && props && count > 0)
+        Lamps_Record(props, count);
+    o_DrawStaticProps(rcx, props, count, shadowDepth, wireframe);
+}
+
+static void Lamps_Frame(const V3& eye)
+{
+    int pick[64];
+    int n = 0;
+    if (g_wdLightMod && g_wdLightModLamps && s_effects && !s_lamps.empty()) {
+        const int maxN = g_wdLightModMax < 1 ? 1 : (g_wdLightModMax > 16 ? 16 : g_wdLightModMax);
+        const float dist = g_wdLightModDist < 100.f ? 100.f : g_wdLightModDist;
+        n = wfx3::PickLamps(s_lamps.data(), (int)s_lamps.size(), eye, dist, maxN, pick);
+        const float radius = g_wdLightModRadius < 25.f ? 25.f : (g_wdLightModRadius > 1000.f ? 1000.f : g_wdLightModRadius);
+        for (int i = 0; i < n; ++i)
+            DlightPut(k_lampKeyBase + pick[i], &s_lamps[pick[i]], radius, g_wdLightModColor, g_wdLightModIntensity);
+    }
+    for (int i = 0; i < s_lampLitN; ++i) {   // kill the ones that dropped out
+        bool still = false;
+        for (int j = 0; j < n && !still; ++j) still = pick[j] == s_lampLit[i];
+        if (!still) DlightPut(k_lampKeyBase + s_lampLit[i], nullptr, 0.f, nullptr, 0);
+    }
+    memcpy(s_lampLit, pick, sizeof(int) * n);
+    s_lampLitN = n;
+
+    static size_t s_logged = 0;
+    static float  s_logAt  = 0.f;
+    if (s_lamps.size() != s_logged && g_wdLightMod && (Now() >= s_logAt || Now() < s_logAt - 10.f)) {
+        s_logged = s_lamps.size();
+        s_logAt  = Now() + 5.f;
+        DebugLog("worldfx3: lighting modulation %zu lamps on this map, %d lit", s_lamps.size(), n);
+    }
+}
+
+static void Lamps_Forget()
+{
+    s_lamps.clear(); s_lampSeen.clear(); s_lampModel.clear();
+    s_lampLitN = 0;
+}
+
 // ==== world / prop / skybox modulation (botox misc.cpp world_modulation) ===================
 // IMaterialSystem: FirstMaterial 73, NextMaterial 74, InvalidMaterial 75, GetMaterial 76 -- counted
 // off ref IMaterialSystem.h with MSVC overload grouping; the same count lands FindMaterial on 71,
 // GetBackBufferDimensions 31, CreateNamedRTEx 85 and GetRenderContext 98, all four confirmed live
 // (flipmath.h flipslot). IMaterial: GetName 0, GetTextureGroupName 1, ColorModulate 28,
 // IsErrorMaterial 42, GetColorModulation 45 (same count, anchors IncRef 12 / DecRef 13 / 28 / 42).
+// Group 4 = lighting modulation's light glow / bloom materials, checked first so a glow sprite takes
+// the light colour, not world tint; rides the same walk + saved originals (off restores).
 static int ModGroup(const char* group, const char* name)
 {
+    if (wfx3::IsLightGlowMaterial(name)) return 4;
     // CS:GO's "StaticProp textures" group does not exist in CS:S (0 string hits); props are plain
     // "Model textures" like players and guns, so props = model materials by name minus those.
     if (group) {
@@ -396,7 +504,8 @@ struct ModSaved { unsigned hash; int group; float orig[3]; char color2[64]; };
 static std::unordered_map<void*, ModSaved> s_modSaved;
 static float s_modNextWalk = 0.f;
 static int   s_modLastMask = 0;
-static float s_modLast[4][3] = {};
+static constexpr int k_modGroups = 5;   // 0 none, 1 world, 2 prop, 3 sky, 4 light glows
+static float s_modLast[k_modGroups][3] = {};
 
 // SEH leaves (no dtors in a __try frame, C2712): the walk itself and the two IMaterial calls.
 __declspec(noinline) static bool MatWalkStep(bool first, unsigned short& h, void*& m, const char*& name, const char*& group)
@@ -459,7 +568,7 @@ static void MatUntint(void* m, const ModSaved& sv)
     else MatColor2Set(m, sv.color2[0] ? sv.color2 : "[1 1 1]");
 }
 
-static void Mod_Walk(int mask, const float wanted[4][3], bool restoreOff)
+static void Mod_Walk(int mask, const float wanted[k_modGroups][3], bool restoreOff)
 {
     if (!s_matSys) s_matSys = GetInterface("materialsystem.dll", "VMaterialSystem082");
     if (!s_matSys) return;
@@ -496,12 +605,12 @@ static void Mod_Walk(int mask, const float wanted[4][3], bool restoreOff)
 
 static void Mod_Frame()
 {
-    const bool en[4] = { false, g_worldTintEnable, g_propTintEnable, g_wdSkyMod };
-    const float* col[4] = { nullptr, g_worldTintColor, g_propTintColor, g_wdSkyModColor };
-    const float  bri[4] = { 0.f, g_wdWorldModBright, g_wdPropModBright, g_wdSkyModBright };
+    const bool en[k_modGroups] = { false, g_worldTintEnable, g_propTintEnable, g_wdSkyMod, g_wdLightMod && g_wdLightModGlows };
+    const float* col[k_modGroups] = { nullptr, g_worldTintColor, g_propTintColor, g_wdSkyModColor, g_wdLightModColor };
+    const float  bri[k_modGroups] = { 0.f, g_wdWorldModBright, g_wdPropModBright, g_wdSkyModBright, g_wdLightModGlowBright };
     int mask = 0;
-    float wanted[4][3] = {};
-    for (int g = 1; g < 4; ++g) {
+    float wanted[k_modGroups][3] = {};
+    for (int g = 1; g < k_modGroups; ++g) {
         if (!en[g]) continue;
         mask |= 1 << g;
         float b = bri[g] * 0.01f;
@@ -654,6 +763,56 @@ __declspec(noinline) static bool IsSsbump(void* m)
     __try { return VCall<int>(v, 26) != 0; } __except (EXCEPTION_EXECUTE_HANDLER) { return true; }
 }
 
+// flat textures (UC onLevelInitPostEntity / Amalgam FindTexture "Flat"): each world base texture swapped
+// for a 1x1 of its own colour, through the same save/restore as world texture (live toggle, no reload;
+// the UC SetShaderAndParams rebuild is cut, it wipes every other param and never restores).
+// ITexture::GetLowResColorSample 8 (Amalgam ITexture.h; IncRef 10 / IsError 15 above anchor it).
+// IMaterial::GetPreviewImage 3 (FindVar 11 anchor). IMaterialSystem::CreateTextureFromBits 125
+// (Amalgam IMaterialSystem.h, counted on from FindTexture 79 / GetRenderContext 98).
+static char s_flatTag;   // TexSaved::applied when flat: textures are per material, no one shared pointer
+// ponytail: one IncRef'd 1x1 per distinct colour, kept across maps (a few hundred tiny textures),
+// freed on eject only
+static std::unordered_map<unsigned, void*> s_flatTex;
+
+__declspec(noinline) static bool TexLowRes(void* t, float s, float u, float* rgb)
+{
+    rgb[0] = -1.f;   // left untouched = texture kept no low-res image
+    __try { VCall<void>(t, 8, s, u, rgb); } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+    return rgb[0] >= 0.f;
+}
+__declspec(noinline) static bool MatPreview(void* m, unsigned char* px)   // disk read: fallback only
+{
+    __try { return VCall<int>(m, 3, px, 1, 1, 0) == 1; }   // IMAGE_FORMAT_RGBA8888, MATERIAL_PREVIEW_IMAGE_OK
+    __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+__declspec(noinline) static void* TexFromBits(unsigned char* px)
+{
+    __try {
+        void* t = VCall<void*>(s_matSys, 125, 1, 1, 1, 0, 4, px);
+        if (t) VCall<void>(t, 10);
+        return t;
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return nullptr; }
+}
+static void* FlatFor(void* m, void* orig)
+{
+    unsigned char px[4] = { 0, 0, 0, 255 };
+    float acc[3] = {}, c[3];
+    int n = 0;
+    for (float s : { 0.25f, 0.75f })
+        for (float u : { 0.25f, 0.75f })
+            if (TexLowRes(orig, s, u, c)) { acc[0] += c[0]; acc[1] += c[1]; acc[2] += c[2]; ++n; }
+    if (n) {
+        for (int k = 0; k < 3; ++k) px[k] = ColByte(acc[k] / n);
+    } else if (!MatPreview(m, px)) return nullptr;
+    px[3] = 255;
+    const unsigned key = px[0] | px[1] << 8 | px[2] << 16;
+    auto it = s_flatTex.find(key);
+    if (it != s_flatTex.end()) return it->second;
+    void* t = TexFromBits(px);
+    if (t) s_flatTex.emplace(key, t);
+    return t;
+}
+
 static const char* TexWanted(bool on, int preset, const char* custom)
 {
     if (!on) return nullptr;
@@ -679,6 +838,9 @@ static void Tex_Frame()
     names[7] = TexWanted(g_wdPropTex, g_wdPropTexPreset, g_wdPropTexCustom);
     sig = sig * 31u + NameHash(names[7]) + 0x50u;
     any |= names[7] != nullptr;
+    const bool flatOn = g_wdFlatTex;
+    sig = sig * 31u + (flatOn ? 0xf1a7u : 0u);
+    any |= flatOn;
     const bool decals = g_wdWorldTex && g_wdWorldTexDecals;
 
     if (!decals && !s_decalHidden.empty()) Decal_UnhideAll();
@@ -736,17 +898,21 @@ static void Tex_Frame()
         }
         TexSaved& e = it->second;
         if (e.slot < 0) continue;
-        void* tex = want[e.slot];
+        void* tex = flatOn && e.slot < 7 ? (void*)&s_flatTag : want[e.slot];
         if (tex == e.applied) continue;
 
         if (tex) {
-            bool wrote = false;
+            bool wrote = false, loaded = false;
             for (int i = 0; i < k_texSlotCount; ++i) {
                 void* var = MatVar(m, k_texSlots[i]);
                 if (!e.orig[i]) { e.orig[i] = VarTexture(var); TexRef(e.orig[i], true); }   // not loaded yet: retried next walk
-                if (e.orig[i]) { VarSetTexture(var, tex); wrote = true; }
+                if (!e.orig[i]) continue;
+                loaded = true;
+                void* t = tex == &s_flatTag ? FlatFor(m, e.orig[i]) : tex;   // flat: blend slots keep their own colour
+                if (t) { VarSetTexture(var, t); wrote = true; }
             }
-            if (!wrote) continue;
+            // loaded but no colour to flatten with: left as is, never re-sampled every walk
+            if (!wrote) { if (loaded) e.applied = tex; continue; }
             if (flat && !IsSsbump(m))
                 for (int i = 0; i < 2; ++i) {
                     void* var = MatVar(m, k_texBumps[i]);
@@ -761,8 +927,8 @@ static void Tex_Frame()
         }
     }
     if (changed || applied || restored || hidden)
-        DebugLog("worldfx3: world texture applied %d restored %d decals hidden +%d (total %d) flat normal %d",
-                 applied, restored, hidden, (int)s_decalHidden.size(), flat ? 1 : 0);
+        DebugLog("worldfx3: world texture applied %d restored %d decals hidden +%d (total %d) flat normal %d flat colours %d",
+                 applied, restored, hidden, (int)s_decalHidden.size(), flat ? 1 : 0, (int)s_flatTex.size());
 }
 
 // ==== ragdoll gravity (botox kill_effects.cpp ragdoll_force_proxy) ========================
@@ -896,6 +1062,11 @@ void WorldFx3_Install()
             SwapVTableHook(mode, k_slotVmFov, "worldfx3: GetViewModelFOV",
                            (void*)h_GetViewModelFOV, (void**)&o_GetViewModelFOV);
     }
+    // botox-tf2 sig (Amalgam), 1 hit in the on-disk CSS x64 engine.dll; body = TF2's byte for byte
+    // bar rip offsets (477/512, checked 11-12)
+    InstallPatternHook(GetModuleHandleA("engine.dll"), "worldfx3: CStaticPropMgr::DrawStaticProps",
+                       "4C 8B DC 49 89 5B ? 49 89 6B ? 49 89 73 ? 57 41 54 41 55 41 56 41 57 48 83 EC ? 4C 8B 3D",
+                       (void*)h_DrawStaticProps, (void**)&o_DrawStaticProps);
 }
 
 void WorldFx3_Tick()
@@ -905,7 +1076,14 @@ void WorldFx3_Tick()
     if (g_wdRagdollGravity > 0) Ragdoll_Hook(true);   // stays in once hooked: passes through at "off"
 }
 
-void WorldFx3_Frame()
+// Map change: the inGame edge above never sees one (OverrideView only runs in game), and the old
+// map's props are freed -- their pointers must not be matched against the new map's.
+void WorldFx3_LevelShutdown()
+{
+    Lamps_Forget();
+}
+
+void WorldFx3_Frame(const float eye[3])
 {
     if (g_eject) return;
     static bool s_inGame = false;
@@ -917,6 +1095,7 @@ void WorldFx3_Frame()
         s_localImpacts.clear();
         s_modSaved.clear(); s_modLastMask = 0;
         memset(s_dlLit, 0, sizeof(s_dlLit));
+        Lamps_Forget();
         s_trailValid = false;
         std::lock_guard<std::mutex> lk(s_drawMx);
         s_boxes.clear(); s_markers.clear();
@@ -926,6 +1105,7 @@ void WorldFx3_Frame()
     void* local = localIdx > 0 ? GetClientEntity(localIdx) : nullptr;
     Trail_Frame(local);
     Dlight_Frame(local, localIdx);
+    Lamps_Frame(ToV3(eye));
     Mod_Frame();
     Tex_Frame();
 }
@@ -935,9 +1115,11 @@ void WorldFx3_Release()
     Cvars_Tick(true);
     Ragdoll_Hook(false);
     Tex_RestoreAll(true);
+    for (auto& kv : s_flatTex) TexRef(kv.second, false);   // after the restore: no material holds them now
+    s_flatTex.clear();
     Decal_UnhideAll();
     if (s_modLastMask) {
-        const float none[4][3] = {};
+        const float none[k_modGroups][3] = {};
         Mod_Walk(0, none, true);
         s_modLastMask = 0;
     }

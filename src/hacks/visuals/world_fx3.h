@@ -18,7 +18,8 @@
 
 void WorldFx3_Install();                    // PollThread (from WorldFx2_InstallHooks)
 void WorldFx3_Tick();                       // 100ms tick (from WorldFx2_Tick)
-void WorldFx3_Frame();                      // main thread, once a frame (from h_OverrideView)
+void WorldFx3_Frame(const float eye[3]);    // main thread, once a frame (from h_OverrideView, view origin)
+void WorldFx3_LevelShutdown();              // game thread, map change/disconnect (h_FlipLevelShutdown): lamp list
 void WorldFx3_OnPlayerHurt(int victimIdx);  // player_hurt, attacker == local (unitE_events.cpp)
 void WorldFx3_OnBulletImpact(int shooterIdx, float x, float y, float z);  // bullet_impact (unitE_events.cpp)
 bool WorldFx3_SkipPanel(void* panels, uintptr_t vpanel);   // h_PaintTraverse: true = don't paint it

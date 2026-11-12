@@ -20,7 +20,7 @@
 #include "movement_tricks2_pure.h" // Unit A3 port: pure decisions (bounce tangent/eb style), gate-tested
 #include "movement_edge_pure.h" // Unit A2 port: pure decisions (edge skip duck gate, blockbot wish/sign), gate-tested
 #include "fireman_pure.h" // ladder unit: fireman catch math (flat-face/degenerate, air-accel approach), gate-tested
-#include "ladder_pure.h"  // ladder unit: fast_ladder/glide/freelook/anti_ladder/auto_one_hop angle math, gate-tested
+#include "ladder_pure.h"  // ladder unit: fast_ladder/glide/freelook/anti_ladder angle math, gate-tested
 #include "detections.h"   // botox chat detections, fed the cmd start state at the publish point
 #include "jumpstats_core.h" // botox jump_stats state machine (movement_ex.inl JumpstatsTick), gate-tested
 #include "../hud/points.h" // g_esFired: edge skip's lip landing, the keybind indicator particle count
@@ -2022,15 +2022,62 @@ static void ClipSet(bool on)
     DebugLog("wallbug fix: ClipVelocity bandaid %s%s", on ? "OFF (patched)" : "back ON (restored)", ok ? "" : " -- a write FAILED");
 }
 
+// ---- no fall damage (11-11): CCSGameRules::FlPlayerFallDamage returns 0 while we host ----------
+// server.dll 0x2f3890 (11-11 disasm): (m_flFallVelocity[+0xa60] - 580) * 0.2404 = cs_gamerules.cpp:1350
+// (CS_DAMAGE_FOR_FALL_SPEED * 1.25), no write-back of the fall speed in this build. Entry ->
+// `xorps xmm0,xmm0; ret` (0F 57 C0 C3): 0 -> CMoveHelperServer::PlayerFallingDamage skips TakeDamage
+// + the FallDamage sound. Landing view punch is gamemovement's, stays. Server only -- the client
+// never deals fall damage, so prediction is untouched. Entry is 16-aligned -> one qword, same
+// interlocked write as the clip sites.
+static const char* const k_fallSig =
+    "40 57 48 83 EC 30 0F 29 74 24 20 0F 57 C0 F3 0F 10 B2 ? ? ? ? 48 8B FA F3 0F 5C 35 ? ? ? ? F3 0F 59 35";
+static ClipSite s_fall;
+static int  s_fallState = 0;       // 0 unresolved, 1 resolved, -1 dead
+static bool s_fallOn = false;
+static HMODULE s_fallMod = nullptr;
+
+static void FallResolve()
+{
+    static const uint8_t kRet0[4] = { 0x0F, 0x57, 0xC0, 0xC3 };
+    HMODULE m = GetModuleHandleA("server.dll");
+    uint8_t* hit = m ? PatternScanUnique(m, k_fallSig) : nullptr;
+    if (!hit || !ClipSiteMake(hit, kRet0, 4, s_fall)) {
+        DebugLog("no fall damage: server.dll FlPlayerFallDamage %s -- option dead", hit ? "alignment check failed" : "sig NOT FOUND");
+        s_fallState = -1;
+        return;
+    }
+    s_fallMod = m;
+    s_fallState = 1;
+    DebugLog("no fall damage: FlPlayerFallDamage @ rva 0x%llx", (unsigned long long)(hit - (uint8_t*)m));
+}
+
+static void FallSet(bool on)
+{
+    if (on == s_fallOn || s_fallState != 1) return;
+    if (GetModuleHandleA("server.dll") != s_fallMod)
+    {
+        s_fallState = 0; s_fallOn = false;
+        DebugLog("no fall damage: module moved, re-resolving");
+        return;
+    }
+    const bool ok = ClipWrite(s_fall, on);
+    s_fallOn = on;
+    DebugLog("no fall damage: %s%s", on ? "ON (patched)" : "OFF (restored)", ok ? "" : " -- write FAILED");
+}
+
 // per cmd, game thread: CreateMove and both games' ClipVelocity run on it, never at the same time
 static void FakeMove_Tick()
 {
-    const bool want = g_fmWallbugFix && !g_eject && CssBridge_IsLoopback();
+    const bool host = !g_eject && CssBridge_IsLoopback();
+    const bool want = g_fmWallbugFix && host;
     if (want && s_clipState == 0) ClipResolve();
     ClipSet(want);
+    const bool wantFall = g_fmNoFallDamage && host;
+    if (wantFall && s_fallState == 0) FallResolve();
+    FallSet(wantFall);
 }
 
-void FakeMove_Restore() { ClipSet(false); }   // eject (poll thread): interlocked writes, see above
+void FakeMove_Restore() { ClipSet(false); FallSet(false); }   // eject (poll thread): interlocked writes, see above
 void FakeMove_DemoTick() {}   // fsn.cpp stage 3 call site, nothing left to do
 
 // practice tab: console commands only (bots, buildings, noclip, save/teleport). AFTER routecalc.inl
@@ -2494,7 +2541,7 @@ static void Movement_RunImpl(UserCmd_t* pCmd)
                       || g_floorLevel; // check floor level: same aim-trace shape, botox calls it right after dist_calc
     // ladder: runs even while bMoveBlocked -- none of the TF2/CS:GO ground+air features below
     // know what MOVETYPE_LADDER is (bMoveBlocked exists precisely to keep them off it), but
-    // fast_ladder/ladder_glide/ladder_freelook_climb/anti_ladder/auto_one_hop need to act on
+    // fast_ladder/ladder_glide/ladder_freelook_climb/anti_ladder need to act on
     // every tick the player is actually attached to one. Own call site, nothing else touched.
     // raw keys first: fireman's ladder ride gates on YOUR keys, not the ladder features' writes
     s_rawJumpHeld = (pCmd->buttons & IN_JUMP) != 0;   // real press, before AutoJump strips it

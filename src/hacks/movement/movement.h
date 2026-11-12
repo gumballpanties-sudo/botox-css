@@ -243,7 +243,6 @@ extern bool g_fastLadder;          extern int g_fastLadderKey;          extern i
 extern bool g_ladderGlide;         extern int g_ladderGlideKey;         extern int g_ladderGlideMode;
 extern bool g_ladderFreelookClimb; extern int g_ladderFreelookClimbKey; extern int g_ladderFreelookClimbMode;
 extern bool g_antiLadder;          extern int g_antiLadderKey;          extern int g_antiLadderMode;
-extern bool g_autoOneHopLadder;    extern int g_autoOneHopLadderKey;    extern int g_autoOneHopLadderMode;
 
 // ==== "show wall slope" (botox menu_tab_movement.cpp:808) -- defined in wallclimb.inl. Wall climb's
 // prevent_slow/duck/viz live in globals.h. "steer to seam" + scale back with the 11-08 botox-tf2 sweep restore

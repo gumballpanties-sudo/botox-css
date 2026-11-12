@@ -25,9 +25,8 @@ bool g_fastLadder = false;            int g_fastLadderKey = 0;            int g_
 bool g_ladderGlide = false;           int g_ladderGlideKey = 0;           int g_ladderGlideMode = 0;
 bool g_ladderFreelookClimb = false;   int g_ladderFreelookClimbKey = 0;   int g_ladderFreelookClimbMode = 0;
 bool g_antiLadder = false;            int g_antiLadderKey = 0;            int g_antiLadderMode = 0;
-bool g_autoOneHopLadder = false;      int g_autoOneHopLadderKey = 0;      int g_autoOneHopLadderMode = 0;
 
-static bool s_antiLadderHit = false, s_autoOneHopHit = false;
+static bool s_antiLadderHit = false;
 
 // ---- fast_ladder / ladder_glide -- csgo-sdk movement.cpp fast_ladder/ladder_glide, verbatim
 // intent: snap the view toward the ladder face while strafing full-speed, so the climb branch's
@@ -145,56 +144,6 @@ static void AntiLadder(void* pLocal, UserCmd_t* pCmd)
     }
 }
 
-// ---- auto_one_hop_onladder -- csgo-sdk movement.cpp auto_one_hop's ladder-climbing phase.
-// CS:GO uses g_prediction.begin/end to ask "does this cmd leave the ladder next tick"; the CSS
-// substitute probes geometrically. BUG (fixed): the re-check LadderMove actually runs once
-// attached does NOT use the view yaw or the un-attached 2u grab trace at all -- when
-// GetMoveType()==MOVETYPE_LADDER, wishdir is forced to -m_vecLadderNormal (the STORED face
-// normal, gamemovement.cpp:2869-2872) and LadderDistance() returns 10u, not 2u, while attached
-// (cs_gamemovement.cpp:54-58). A trace along the camera's view yaw for 2u checks a direction
-// and a distance the engine never checks. Fixed: find the real face normal the same way
-// fireman.inl's FmLadderFace does (it already runs this exact 10u-attached search), then probe
-// along -normal for 10u, from the current spot and from one climb-step higher -- press jump
-// before the higher probe misses, same as CS:GO's "will_leave -> phase_jumped" transition
-// (:2323-2345 in csgo-sdk).
-static bool AutoOneHopProbe(void* pLocal, const Vec3& start, const Vec3& mins, const Vec3& maxs, const Vec3& n)
-{
-    TraceFilterWorldBrush fil; fil.Setup(pLocal);
-    const Vec3 end = start - n * 10.f;   // LadderDistance() attached = 10u, wishdir = -storedNormal
-    GameTrace_t tr{};
-    TraceHull(start, end, mins, maxs, k_ladderMaskMv, &fil, &tr);
-    return tr.fraction < 1.f && (tr.contents & k_contentsLadderMv);
-}
-
-static void AutoOneHopLadder(void* pLocal, UserCmd_t* pCmd)
-{
-    s_autoOneHopHit = false;
-    if (!On(g_autoOneHopLadder, g_autoOneHopLadderKey, g_autoOneHopLadderMode)) return;
-    if (g_offOrigin <= 0 || g_offMins <= 0 || g_offMaxs <= 0) return;
-    if (EntMoveType(pLocal) != MOVETYPE_LADDER) return;
-
-    const Vec3 origin = EntV3(pLocal, g_offOrigin);
-    const Vec3 mins = EntV3(pLocal, g_offMins), maxs = EntV3(pLocal, g_offMaxs);
-
-    Vec3 n{};
-    const bool hasFace = FmLadderFace(pLocal, origin, mins, maxs, n);
-    const float climbStep = 200.f * TickInterval();   // ClimbSpeed() flat MAX_CLIMB_SPEED, shareddefs.h:103
-    const bool stillOn = hasFace && AutoOneHopProbe(pLocal, origin, mins, maxs, n);
-    const bool leavesNext = stillOn
-        && !AutoOneHopProbe(pLocal, Vec3(origin.x, origin.y, origin.z + climbStep), mins, maxs, n);
-
-    if (leavesNext)
-    {
-        pCmd->buttons |= IN_JUMP;   // LadderMove's own IN_JUMP branch flings us off the top
-        pCmd->forwardmove = 0.f; pCmd->sidemove = 0.f;
-        s_autoOneHopHit = true;
-        return;
-    }
-
-    pCmd->buttons |= IN_FORWARD; pCmd->buttons &= ~IN_BACK;
-    pCmd->forwardmove = 450.f; pCmd->sidemove = 0.f; pCmd->upmove = 0.f;
-}
-
 // ---- dispatcher for the Movement_RunImpl call site: every feature here needs movetype==LADDER
 // live, which bMoveBlocked's early return would otherwise hide (see file header).
 static void LadderOnLadderTick(void* pLocal, UserCmd_t* pCmd)
@@ -203,7 +152,6 @@ static void LadderOnLadderTick(void* pLocal, UserCmd_t* pCmd)
     LadderGlide(pLocal, pCmd);
     LadderFreelookClimb(pLocal, pCmd);
     AntiLadder(pLocal, pCmd);
-    AutoOneHopLadder(pLocal, pCmd);
 }
 
 // ---- edge jump "on ladders" + long jump's edge jump "on ladders" -- csgo-sdk movement.cpp
@@ -226,7 +174,7 @@ static void LadderEdgeJump(void* pLocal, UserCmd_t* pCmd)
                  || (g_miniJumpEdge && On(g_miniJump, g_miniJumpKey, g_miniJumpMode)));
     const bool lj = g_longJumpEdge && g_longJumpEdgeLadder && On(g_longJump, g_longJumpKey, g_longJumpMode);
     if (!ej && !lj) return;
-    if (pCmd->buttons & IN_JUMP) return;   // already jumping off (you, or auto one hop)
+    if (pCmd->buttons & IN_JUMP) return;   // already jumping off
     if (g_offVelocity <= 0) return;
 
     UserCmd_t plain = *pCmd;

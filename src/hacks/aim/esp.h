@@ -36,6 +36,7 @@ struct EspPlayer
 	float m_healthFactor = 0.f;            // animated health / 100 (CS:S: fixed 100 max hp), clamped 0..1
 	bool m_visible = false;                // visibility trace result (lazy: only run if a vis-colour feature asked)
 	float m_distance = 0.f;
+	int m_index = 0;                       // entindex: label declutter stack key (esp_declutter.h); 0 = labels fixed
 
 	uint64_t m_steamId = 0;                // 0 = no avatar (bot / lookup failed)
 	CSWeaponID m_weaponId = WEAPON_NONE;   // active weapon id; WEAPON_NONE = no weapon -> WeaponName()/icon skipped

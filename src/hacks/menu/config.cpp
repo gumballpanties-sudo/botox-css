@@ -513,9 +513,6 @@ static const CfgEntry kEntries[] = {
     { "fastLadder",       CfgEntry::BOOL,   &g_fastLadder, 0 },
     { "fastLadderKey",    CfgEntry::INT,    &g_fastLadderKey, 0 },
     { "fastLadderMode",   CfgEntry::INT,    &g_fastLadderMode, 0 },
-    { "autoOneHop",       CfgEntry::BOOL,   &g_autoOneHopLadder, 0 },
-    { "autoOneHopKey",    CfgEntry::INT,    &g_autoOneHopLadderKey, 0 },
-    { "autoOneHopMode",   CfgEntry::INT,    &g_autoOneHopLadderMode, 0 },
     { "wallClimbPreventSlow", CfgEntry::BOOL, &g_wcPreventSlow, 0 },
     { "wallClimbDuck",    CfgEntry::BOOL,   &g_wcDuck, 0 },
     { "wallClimbSeamSteer", CfgEntry::BOOL, &g_wallClimbSeamSteer, 0 },
@@ -594,6 +591,7 @@ static const CfgEntry kEntries[] = {
 
     // fake movement (fm*) rows removed (11-03/11-04): no botox csgo equivalent, see globals.h
     { "fmWallbugFix",     CfgEntry::BOOL,   &g_fmWallbugFix, 0 },
+    { "fmNoFallDamage",   CfgEntry::BOOL,   &g_fmNoFallDamage, 0 },
     { "psFinder",         CfgEntry::BOOL,   &g_psFinder, 0 },
     { "psFinderKey",      CfgEntry::INT,    &g_psFinderKey, 0 },
     { "psFinderMode",     CfgEntry::INT,    &g_psFinderMode, 0 },

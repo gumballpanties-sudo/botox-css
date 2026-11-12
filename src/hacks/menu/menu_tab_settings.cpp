@@ -154,6 +154,7 @@ struct MenuStyleRow
     float windowRounding, frameRounding, popupRounding;
     ImFont* (*regFont)();    // nullptr = leave the chrome font alone (default style)
     ImFont* (*boldFont)();
+    bool gamesense = false;  // skeet frame + gradient bar over the window (menu.cpp GamesenseFrame), layout untouched
 };
 
 static const MenuStyleRow k_menuStyles[] = {
@@ -175,6 +176,10 @@ static const MenuStyleRow k_menuStyles[] = {
     { "dna", IM_COL32(9, 9, 9, 240), IM_COL32(9, 9, 9, 240), IM_COL32(20, 20, 20, 153), IM_COL32(13, 13, 13, 255),
       IM_COL32(26, 26, 26, 178), IM_COL32(255, 255, 255, 8), IM_COL32(20, 20, 20, 255), IM_COL32(242, 242, 242, 255),
       IM_COL32(77, 77, 77, 217), 4.f, 2.f, 4.f, []() -> ImFont* { return g_fontDnaMontserrat15; }, []() -> ImFont* { return g_fontDnaPtRootBold15; } },
+    // csgo menu.cpp "gamesense" row; null fonts = verdana pair
+    { "gamesense", IM_COL32(20, 20, 20, 255), IM_COL32(12, 12, 12, 255), IM_COL32(23, 23, 23, 255), IM_COL32(35, 35, 35, 255),
+      IM_COL32(10, 10, 10, 255), IM_COL32(10, 10, 10, 255), IM_COL32(23, 23, 23, 255), IM_COL32(205, 205, 205, 255),
+      IM_COL32(120, 120, 120, 255), 0.f, 0.f, 0.f, nullptr, nullptr, true },
 };
 static const int k_menuStyleCount = (int)(sizeof(k_menuStyles) / sizeof(k_menuStyles[0]));
 
@@ -200,6 +205,7 @@ static void MenuStyleApply(const MenuStyleRow& s)
 
 int MenuStyleCount() { return k_menuStyleCount; }
 void MenuStyleApplyAt(int i) { MenuStyleApply(k_menuStyles[i]); }
+bool MenuStyleGamesense(int i) { return k_menuStyles[i].gamesense; }
 
 // botox tab_settings: col1 "config" + "system", col2 "visuals config" + "menu". Left out, no
 // TF2 counterpart: "botox network" (no TF2 server).

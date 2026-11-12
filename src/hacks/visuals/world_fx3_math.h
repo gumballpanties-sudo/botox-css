@@ -237,4 +237,56 @@ inline int HudElemFor(const char* name)
     return -1;
 }
 
+// ---- lighting modulation (UC "Lighting Modulation (Using dLights)" + light glow material tint) ----
+// Lamp-looking static prop model. Keywords = the post's; "lighthouse"/"flight"/"lightning"/switches
+// are not lamps, players/hostages/guns never are.
+inline bool IsLampModel(const char* model)
+{
+    static const char* const veto[] = { "models/player", "models/characters", "models/weapons", "lighthouse",
+        "flight", "highlight", "lightning", "switch" };
+    static const char* const lamp[] = { "lamp", "light", "bulb", "lantern", "fixture", "neon" };
+    char m[192];
+    TexNormalize(model, m, sizeof(m));
+    return m[0] && !TexAny(m, veto, (int)(sizeof(veto) / sizeof(veto[0]))) &&
+           TexAny(m, lamp, (int)(sizeof(lamp) / sizeof(lamp[0])));
+}
+
+// Light bloom / glow / volumetric material (the post's list). Dropped from it: "beam" -- that hit our
+// own tracer sprites (laserbeam/physbeam). Vetoed: the post's structural words, players/guns,
+// particles and every UI path ("_glow" hud/vgui art would tint the hud).
+inline bool IsLightGlowMaterial(const char* name)
+{
+    static const char* const veto[] = { "wall", "concrete", "brick", "metal", "wood", "floor", "ceiling", "roof",
+        "building", "structure", "models/player", "models/weapons", "models/characters", "particle/", "vgui/",
+        "hud/", "console/", "debug/", "dev/", "laser", "physbeam" };
+    static const char* const glow[] = { "lighteffect", "sprites/glow", "sprites/light", "light_glow", "_glow",
+        "spotlight", "volumetric", "lightbeam" };
+    char m[192];
+    TexNormalize(name, m, sizeof(m));
+    return m[0] && !TexAny(m, veto, (int)(sizeof(veto) / sizeof(veto[0]))) &&
+           TexAny(m, glow, (int)(sizeof(glow) / sizeof(glow[0])));
+}
+
+// The up to maxOut lamps nearest the eye within maxDist, nearest first, as indices into lamps.
+// ponytail: O(n * maxOut) insertion, n = lamps seen this map (tens to low hundreds).
+inline int PickLamps(const V3* lamps, int n, const V3& eye, float maxDist, int maxOut, int* out)
+{
+    float d2s[64];
+    if (maxOut > 64) maxOut = 64;
+    if (maxOut <= 0 || !lamps || !out) return 0;
+    int k = 0;
+    const float lim = maxDist * maxDist;
+    for (int i = 0; i < n; ++i) {
+        const float dx = lamps[i].x - eye.x, dy = lamps[i].y - eye.y, dz = lamps[i].z - eye.z;
+        const float d2 = dx * dx + dy * dy + dz * dz;
+        if (!(d2 <= lim)) continue;
+        int j = k < maxOut ? k++ : maxOut;
+        if (j == maxOut && d2 >= d2s[maxOut - 1]) continue;
+        if (j == maxOut) j = maxOut - 1;
+        for (; j > 0 && d2s[j - 1] > d2; --j) { d2s[j] = d2s[j - 1]; out[j] = out[j - 1]; }
+        d2s[j] = d2; out[j] = i;
+    }
+    return k;
+}
+
 } // namespace wfx3
