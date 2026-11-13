@@ -985,6 +985,7 @@ extern float g_glowWaveColor[4];
 extern float g_glowWaveSpeed;
 extern float g_glowWaveSize;
 extern float g_glowWaveStrength;
+extern bool  g_glowWavePlayer;          // wave rides each player's body, not the screen
 extern bool  g_glowPulse;
 extern float g_glowPulseSpeed;
 extern float g_glowPulseMin;

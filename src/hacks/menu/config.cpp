@@ -822,6 +822,7 @@ static const CfgEntry kEntries[] = {
     { "glowWaveSpeed",          CfgEntry::FLOAT,  &g_glowWaveSpeed, 0 },
     { "glowWaveSize",           CfgEntry::FLOAT,  &g_glowWaveSize, 0 },
     { "glowWaveStrength",       CfgEntry::FLOAT,  &g_glowWaveStrength, 0 },
+    { "glowWavePlayer",         CfgEntry::BOOL,   &g_glowWavePlayer, 0 },
     { "glowPulse",              CfgEntry::BOOL,   &g_glowPulse, 0 },
     { "glowPulseSpeed",         CfgEntry::FLOAT,  &g_glowPulseSpeed, 0 },
     { "glowPulseMin",           CfgEntry::FLOAT,  &g_glowPulseMin, 0 },

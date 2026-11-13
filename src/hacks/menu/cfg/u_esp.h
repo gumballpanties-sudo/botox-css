@@ -7,6 +7,12 @@ inline bool  g_esxStencil = false;                                      // m_pla
 inline float g_esxStencilVisColor[4]   = { 1.f, 1.f, 1.f, 1.f };
 inline float g_esxStencilInvisColor[4] = { 114 / 255.f, 155 / 255.f, 221 / 255.f, 1.f };
 inline float g_esxStencilThickness = 1.5f;
+inline bool  g_esxStencilWave = false;                                  // m_players_stencil_wave
+inline float g_esxStencilWaveColor[4] = { 1.f, 1.f, 1.f, 1.f };
+inline float g_esxStencilWaveSpeed = 0.5f;
+inline float g_esxStencilWaveSize = 0.35f;
+inline float g_esxStencilWaveStrength = 0.8f;
+inline bool  g_esxStencilWavePlayer = true;                             // wave rides each player's body, not the screen
 
 inline bool  g_esxInnerGlow = false;                                    // m_inner_glow
 inline float g_esxInnerGlowVisColor[4]   = { 1.f, 1.f, 1.f, 200 / 255.f };

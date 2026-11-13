@@ -137,7 +137,8 @@ namespace
 		D3DVIEWPORT9 oldVp{};
 		RECT oldScissor{};
 		DWORD fvf = 0;
-		float oldK[12][4]{};
+		constexpr UINT kConstants = 80;   // c0..c13 settings, c15 wave anchor, c16..c47 player boxes, c48..c79 phases
+		float oldK[kConstants][4]{};
 
 		// botox k_states / k_state_values
 		constexpr D3DRENDERSTATETYPE kStates[] = { D3DRS_STENCILENABLE, D3DRS_TWOSIDEDSTENCILMODE, D3DRS_STENCILFUNC, D3DRS_STENCILREF,
@@ -162,7 +163,7 @@ namespace
 		dev->GetIndices(&oldIndices);
 		dev->GetViewport(&oldVp);
 		dev->GetScissorRect(&oldScissor);
-		dev->GetPixelShaderConstantF(0, oldK[0], 12);
+		dev->GetPixelShaderConstantF(0, oldK[0], kConstants);
 		dev->GetTexture(0, &oldTex);
 		for (size_t i = 0; i < std::size(kStates); ++i) { dev->GetRenderState(kStates[i], &oldStates[i]); dev->SetRenderState(kStates[i], kValues[i]); }
 		for (size_t i = 0; i < std::size(kSamplers); ++i) { dev->GetSamplerState(0, kSamplers[i], &oldSamplers[i]); dev->SetSamplerState(0, kSamplers[i], kSamplerValues[i]); }
@@ -195,6 +196,25 @@ namespace
 		dev->SetPixelShaderConstantF(9, st.waveColor, 1);
 		dev->SetPixelShaderConstantF(10, st.innerVisible, 1);
 		dev->SetPixelShaderConstantF(11, st.innerInvisible, 1);
+		dev->SetPixelShaderConstantF(12, st.outlineWave, 1);
+		dev->SetPixelShaderConstantF(13, st.outlineWaveColor, 1);
+		dev->SetPixelShaderConstantF(15, st.waveAnchor, 1);
+		// player boxes: ndc -> this target's uv through the view rect, like the capsules
+		if (const int nBoxes = std::min((int)st.waveAnchor[1], PlayerStencilSettings::kMaxBoxes); nBoxes > 0)
+		{
+			const float hw = 0.5f * float(oldVp.Width), hh = 0.5f * float(oldVp.Height);
+			float uvBoxes[PlayerStencilSettings::kMaxBoxes][4]{};
+			for (int i = 0; i < nBoxes; i++)
+			{
+				const float* b = st.boxes[i];
+				uvBoxes[i][0] = (vl + (b[0] + 1.f) * hw) / W;
+				uvBoxes[i][1] = (vt + (1.f - b[3]) * hh) / H;
+				uvBoxes[i][2] = (vl + (b[2] + 1.f) * hw) / W;
+				uvBoxes[i][3] = (vt + (1.f - b[1]) * hh) / H;
+			}
+			dev->SetPixelShaderConstantF(16, uvBoxes[0], nBoxes);
+			dev->SetPixelShaderConstantF(48, st.boxPhase[0], nBoxes);
+		}
 
 		// ---- mask: red where 2 <= stencil < 128 (visible), green where stencil == 1 (occluded) ----
 		dev->SetRenderTarget(0, tg.msaaSurf ? tg.msaaSurf : tg.maskSurf);
@@ -327,7 +347,7 @@ namespace
 		dev->SetDepthStencilSurface(depthStencil);
 		dev->SetViewport(&oldVp);
 		dev->SetScissorRect(&oldScissor);
-		dev->SetPixelShaderConstantF(0, oldK[0], 12);
+		dev->SetPixelShaderConstantF(0, oldK[0], kConstants);
 		dev->SetPixelShader(oldPs);
 		dev->SetVertexShader(oldVs);
 		if (fvf) dev->SetFVF(fvf);   // fvf first, decl last (ssao.cpp AoRestore)

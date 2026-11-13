@@ -203,6 +203,8 @@ void UnitC_Menu_visuals_esp()
                 if (!legacy)
                     ImGui::SliderFloat("wave size##player glow wave", &g_glowWaveSize, 0.05f, 2.f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
                 ImGui::SliderFloat("wave strength##player glow wave", &g_glowWaveStrength, 0.f, 1.f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+                if (!legacy)
+                    ImGui::Checkbox("follow player##player glow wave", &g_glowWavePlayer);
             }
 
             ImGui::Checkbox("edge pulse##player glow", &g_glowPulse);
@@ -232,6 +234,15 @@ void UnitC_Menu_visuals_esp()
             ImGui::ColorRow("player visible##player stencil vis color", g_esxStencilVisColor, kPickerAlpha);
             ImGui::ColorRow("player invisible##player stencil invis color", g_esxStencilInvisColor, kPickerAlpha);
             ImGui::SliderFloat("thickness##player stencil", &g_esxStencilThickness, 0.5f, 8.f, "%.1f px", ImGuiSliderFlags_AlwaysClamp);
+
+            ImGui::Checkbox("accent wave##player stencil", &g_esxStencilWave);
+            if (g_esxStencilWave) {
+                ImGui::ColorRow("wave color##player stencil wave", g_esxStencilWaveColor, kPickerNoAlpha);
+                ImGui::SliderFloat("wave speed##player stencil wave", &g_esxStencilWaveSpeed, 0.05f, 4.f, "%.2fx", ImGuiSliderFlags_AlwaysClamp);
+                ImGui::SliderFloat("wave size##player stencil wave", &g_esxStencilWaveSize, 0.05f, 2.f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+                ImGui::SliderFloat("wave strength##player stencil wave", &g_esxStencilWaveStrength, 0.f, 1.f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+                ImGui::Checkbox("follow player##player stencil wave", &g_esxStencilWavePlayer);
+            }
         }, ImVec2(220.f, -1));
 
     ImGui::Checkbox("internal player glow", &g_esxInnerGlow);

@@ -25,6 +25,12 @@ struct PlayerStencilSettings
 	float wave[4] = {};                                        // c8: on, phase, 1/size, strength
 	float waveColor[4] = {};                                   // c9
 	float innerVisible[4] = {}, innerInvisible[4] = {};        // c10 c11
+	float outlineWave[4] = {}, outlineWaveColor[4] = {};       // c12 c13: stencil outline accent wave
+	// wave anchored to each player's body: c15 = glow anchor, box count, outline anchor;
+	// boxes = ndc bounds per player (x0 y0 x1 y1, main thread) -> c16.., phase offsets -> c48..
+	static constexpr int kMaxBoxes = 32;
+	float waveAnchor[4] = {};
+	float boxes[kMaxBoxes][4] = {}, boxPhase[kMaxBoxes][4] = {};
 	float innerReach[4] = {};                                  // c7 for the inner passes: intensity, -, size
 	int   nCapsules = 0;
 	PlayerStencilCapsule capsules[kMaxCapsules];

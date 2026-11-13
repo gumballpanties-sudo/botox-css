@@ -71,6 +71,7 @@ extern float g_glowWaveColor[4];
 extern float g_glowWaveSpeed;
 extern float g_glowWaveSize;
 extern float g_glowWaveStrength;
+extern bool  g_glowWavePlayer;           // wave rides each player's body, not the screen
 extern bool  g_glowPulse;
 extern float g_glowPulseSpeed;
 extern float g_glowPulseMin;
@@ -995,6 +996,76 @@ namespace
 {
 	void Rgba(float out[4], const float* c) { for (int k = 0; k < 4; k++) out[k] = c[k]; }
 
+	// stencil outline accent wave (botox m_players_stencil_wave): c12 / c13. real time keeps moving in
+	// pause; phase kept in 0..1 so float precision never runs out
+	void OutlineWaveParams(PlayerStencilSettings& st)
+	{
+		st.outlineWave[0] = st.outlineWave[1] = st.outlineWave[2] = st.outlineWave[3] = 0.f;
+		if (!g_esxStencilWave) return;
+		const float now = I::GlobalVars ? I::GlobalVars->realtime : 0.f;
+		const float phase = fmodf(now * g_esxStencilWaveSpeed, 1.f);
+		st.outlineWave[0] = 1.f;
+		st.outlineWave[1] = phase < 0.f ? phase + 1.f : phase;
+		st.outlineWave[2] = 1.f / std::clamp(g_esxStencilWaveSize, 0.05f, 4.f);
+		st.outlineWave[3] = std::clamp(g_esxStencilWaveStrength, 0.f, 1.f);
+		Rgba(st.outlineWaveColor, g_esxStencilWaveColor);
+	}
+
+	// wave anchor boxes (botox player_stencil run()): ndc hull bounds of every glow player, wave phase
+	// offset by entindex so they don't flash together. A corner behind the camera = no box for that player
+	void StencilBoxes(PlayerStencilSettings& st, bool bGlowAnchor, bool bOutlineAnchor)
+	{
+		st.waveAnchor[0] = st.waveAnchor[1] = st.waveAnchor[2] = 0.f;
+		if (!bGlowAnchor && !bOutlineAnchor) return;
+		const VMatrix& m = I::EngineClient->WorldToScreenMatrix();
+		int n = 0;
+		for (auto& it : s_glowItems)
+		{
+			if (n >= PlayerStencilSettings::kMaxBoxes) break;
+			if (!it.pEnt->IsPlayer()) continue;
+			const Vec3 o = it.pEnt->GetAbsOrigin(), mn = it.pEnt->m_vecMins(), mx = it.pEnt->m_vecMaxs();
+			float lo[2] = { 1e9f, 1e9f }, hi[2] = { -1e9f, -1e9f };
+			bool ok = true;
+			for (int i = 0; i < 8 && ok; i++)
+			{
+				const Vec3 p = { o.x + ((i & 1) ? mx.x : mn.x), o.y + ((i & 2) ? mx.y : mn.y), o.z + ((i & 4) ? mx.z : mn.z) };
+				const float w = m[3][0] * p.x + m[3][1] * p.y + m[3][2] * p.z + m[3][3];
+				if (w < 1.f) { ok = false; break; }
+				const float x = (m[0][0] * p.x + m[0][1] * p.y + m[0][2] * p.z + m[0][3]) / w;
+				const float y = (m[1][0] * p.x + m[1][1] * p.y + m[1][2] * p.z + m[1][3]) / w;
+				lo[0] = std::min(lo[0], x); lo[1] = std::min(lo[1], y);
+				hi[0] = std::max(hi[0], x); hi[1] = std::max(hi[1], y);
+			}
+			if (!ok) continue;
+			float* b = st.boxes[n];
+			b[0] = lo[0]; b[1] = lo[1]; b[2] = hi[0]; b[3] = hi[1];
+			st.boxPhase[n][0] = (float)it.pEnt->entindex() * 0.17f;
+			n++;
+		}
+		st.waveAnchor[0] = bGlowAnchor ? 1.f : 0.f;
+		st.waveAnchor[1] = (float)n;
+		st.waveAnchor[2] = bOutlineAnchor ? 1.f : 0.f;
+	}
+
+	// preview twin: one box over the given capsules' ends (already ndc), phase 0
+	void PreviewBox(PlayerStencilSettings& st, bool bGlowAnchor, bool bOutlineAnchor)
+	{
+		st.waveAnchor[0] = st.waveAnchor[1] = st.waveAnchor[2] = 0.f;
+		if ((!bGlowAnchor && !bOutlineAnchor) || st.nCapsules <= 0) return;
+		float* b = st.boxes[0];
+		b[0] = b[1] = 1e9f; b[2] = b[3] = -1e9f;
+		for (int i = 0; i < st.nCapsules; i++)
+			for (const float* p : { st.capsules[i].a, st.capsules[i].b })
+			{
+				b[0] = std::min(b[0], p[0]); b[1] = std::min(b[1], p[1]);
+				b[2] = std::max(b[2], p[0]); b[3] = std::max(b[3], p[1]);
+			}
+		st.boxPhase[0][0] = 0.f;
+		st.waveAnchor[0] = bGlowAnchor ? 1.f : 0.f;
+		st.waveAnchor[1] = 1.f;
+		st.waveAnchor[2] = bOutlineAnchor ? 1.f : 0.f;
+	}
+
 	// botox player_stencil after_glow(): settings off the menu vars, capsules off the hitboxes
 	// botox player_stencil glow settings (gradient / additive radius / wave / pulse) off the menu vars.
 	// radiusScale: 2 on the esp preview's 2x target, capped at the 32-tap loop like csgo
@@ -1100,6 +1171,8 @@ namespace
 		st.thickness = std::clamp(g_esxStencilThickness, 0.5f, 8.f);
 
 		GlowParams(st, 1.f);
+		OutlineWaveParams(st);
+		StencilBoxes(st, bGlow && g_glowWave && g_glowWavePlayer, g_esxStencilWave && g_esxStencilWavePlayer);
 		PlayerStencil_Submit(st);
 	}
 
@@ -1174,6 +1247,8 @@ namespace
 		// resolution (not NDC), so it needs the same x2 + 31 cap as innerReach above.
 		st.thickness = std::min(std::clamp(g_esxStencilThickness, 0.5f, 8.f) * 2.f, 31.f);
 		GlowParams(st, 2.f);
+		OutlineWaveParams(st);
+		PreviewBox(st, bGlow && g_glowWave && g_glowWavePlayer, g_esxStencilWave && g_esxStencilWavePlayer);
 		PlayerStencil_Submit(st, true /*preview instance*/);
 	}
 }

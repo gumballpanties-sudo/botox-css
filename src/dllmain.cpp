@@ -907,6 +907,7 @@ float g_glowWaveColor[4]       = { 1.f, 1.f, 1.f, 1.f };
 float g_glowWaveSpeed = 0.5f;
 float g_glowWaveSize = 0.35f;
 float g_glowWaveStrength = 0.8f;
+bool  g_glowWavePlayer = true;
 bool  g_glowPulse = false;
 float g_glowPulseSpeed = 1.f;
 float g_glowPulseMin = 35.f;
