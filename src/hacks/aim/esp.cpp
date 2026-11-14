@@ -543,7 +543,7 @@ namespace
 
 void CEsp::OnPlayerHurt(CCSPlayer* pVictim, int iDamage)
 {
-	if (!g_espEnable || iDamage <= 0)
+	if (!Esp_On() || iDamage <= 0)
 		return;
 	const int iVictim = pVictim->entindex();
 	const float flNow = I::GlobalVars->realtime;
@@ -1305,7 +1305,7 @@ void CEsp::Draw(CCSPlayer* pLocal)
 		}
 
 		m_nDrawn = 0;
-		if (g_espEnable)
+		if (Esp_On())
 		{
 			DrawPlayers(pLocal);
 			DrawSoundArrows(pLocal);

@@ -586,6 +586,14 @@ extern bool g_removeScreenEffects; // swallow Shake/Fade/Rumble user messages
 // -- Flip world (flipworld.cpp) ---------------------------------------------------------------
 extern bool g_flipWorld;
 
+// -- Rear view mirror (rear_mirror.cpp) --
+extern bool  g_rearMirror;
+extern int   g_rearMirrorWidth;
+extern int   g_rearMirrorHeight;
+extern float g_rearMirrorFov;
+extern float g_rearMirrorRounding;
+extern bool  g_rearMirrorFlip;
+
 // -- Lag resolver (lagres.cpp) -- visual anti-twitch for laggy players ---------------------
 extern bool  g_lagResolver;
 extern bool  g_lrYaw;
@@ -986,6 +994,7 @@ extern float g_glowWaveSpeed;
 extern float g_glowWaveSize;
 extern float g_glowWaveStrength;
 extern bool  g_glowWavePlayer;          // wave rides each player's body, not the screen
+extern float g_glowWaveAngle;           // deg, 0 = screen diagonal / head to feet
 extern bool  g_glowPulse;
 extern float g_glowPulseSpeed;
 extern float g_glowPulseMin;

@@ -281,6 +281,16 @@ static void Page_VisualsWorld()
         if (g_flipWorld)
             ImGui::Checkbox("gun other side##flip world", &g_wdFlipGunOtherSide);
 
+        ImGui::Checkbox("rear view mirror", &g_rearMirror);
+        if (g_rearMirror)
+            ImGui::OptionPopup("rear view mirror settings", [&]() {
+                ImGui::SliderInt("width##rear mirror", &g_rearMirrorWidth, 80, 1280, "%d px", ImGuiSliderFlags_AlwaysClamp);
+                ImGui::SliderInt("height##rear mirror", &g_rearMirrorHeight, 40, 720, "%d px", ImGuiSliderFlags_AlwaysClamp);
+                ImGui::SliderFloat("fov##rear mirror", &g_rearMirrorFov, 30.f, 150.f, "%.0f deg", ImGuiSliderFlags_AlwaysClamp);
+                ImGui::SliderFloat("rounding##rear mirror", &g_rearMirrorRounding, 0.f, 60.f, "%.0f px", ImGuiSliderFlags_AlwaysClamp);
+                ImGui::Checkbox("mirror image##rear mirror", &g_rearMirrorFlip);
+            }, ImVec2(220.f, -1.f));
+
         // UNIT_MENU_SLOT visuals_world: dlight .. world hit marker, then minecraft sky
         UnitD_Menu_visuals_world();
     }

@@ -198,6 +198,7 @@ namespace
 		dev->SetPixelShaderConstantF(11, st.innerInvisible, 1);
 		dev->SetPixelShaderConstantF(12, st.outlineWave, 1);
 		dev->SetPixelShaderConstantF(13, st.outlineWaveColor, 1);
+		dev->SetPixelShaderConstantF(14, st.waveAngle, 1);
 		dev->SetPixelShaderConstantF(15, st.waveAnchor, 1);
 		// player boxes: ndc -> this target's uv through the view rect, like the capsules
 		if (const int nBoxes = std::min((int)st.waveAnchor[1], PlayerStencilSettings::kMaxBoxes); nBoxes > 0)

@@ -55,6 +55,7 @@ extern char  g_chamsWeaponCfg[ChamsLayers::kCfgLen];
 // and CTFPlayer_GetEffectiveInvisibilityLevel is confirmed MISSING in CSS (docs/port/sig_check.md).
 
 extern bool  g_espEnable;                // botox m_players: stencil / inner / full-res glow need it
+bool Esp_On();                           // g_espEnable + esp keybind (esp_vars.h); preview keeps plain g_espEnable
 extern bool  g_glowEnable;               // botox "player glow"
 extern float g_glowVisColor[4];
 extern float g_glowInvisColor[4];
@@ -72,6 +73,7 @@ extern float g_glowWaveSpeed;
 extern float g_glowWaveSize;
 extern float g_glowWaveStrength;
 extern bool  g_glowWavePlayer;           // wave rides each player's body, not the screen
+extern float g_glowWaveAngle;            // deg, turns the wave direction
 extern bool  g_glowPulse;
 extern float g_glowPulseSpeed;
 extern float g_glowPulseMin;
@@ -1009,6 +1011,9 @@ namespace
 		st.outlineWave[2] = 1.f / std::clamp(g_esxStencilWaveSize, 0.05f, 4.f);
 		st.outlineWave[3] = std::clamp(g_esxStencilWaveStrength, 0.f, 1.f);
 		Rgba(st.outlineWaveColor, g_esxStencilWaveColor);
+		const float angle = g_esxStencilWaveAngle * 0.017453293f;   // c14.zw
+		st.waveAngle[2] = cosf(angle);
+		st.waveAngle[3] = sinf(angle);
 	}
 
 	// wave anchor boxes (botox player_stencil run()): ndc hull bounds of every glow player, wave phase
@@ -1094,6 +1099,9 @@ namespace
 			st.wave[2] = 1.f / std::clamp(g_glowWaveSize, 0.05f, 4.f);
 			st.wave[3] = std::clamp(g_glowWaveStrength, 0.f, 1.f);
 			Rgba(st.waveColor, g_glowWaveColor);
+			const float angle = g_glowWaveAngle * 0.017453293f;   // c14.xy
+			st.waveAngle[0] = cosf(angle);
+			st.waveAngle[1] = sinf(angle);
 		}
 		if (g_glowPulse)
 		{
@@ -1375,10 +1383,11 @@ void* Glow_PreviewTarget() { return s_previewTarget; }
 void Glow_Render()
 {
 	// botox player_stencil enabled() / inner_enabled() / glow_wanted(): all need the players esp on
-	const bool bLive = g_espEnable && !PlayerStencil_Failed();
+	const bool bEsp = Esp_On();   // halo too: esp bind released = no glow (csgo glow_effect_spectator)
+	const bool bLive = bEsp && !PlayerStencil_Failed();
 	const bool bOutline = bLive && g_esxStencil, bInner = bLive && g_esxInnerGlow;
 	const bool bFullGlow = bLive && g_glowEnable && !g_glowLegacy;
-	if (!g_glowEnable && !bOutline && !bInner)
+	if (!bEsp || (!g_glowEnable && !bOutline && !bInner))
 		return;
 	if (!s_glowReady)
 	{
@@ -1422,7 +1431,9 @@ void Glow_Render()
 		const bool bVisible = SDK::VisPos(pLocal, pPlayer, vEye, pPlayer->GetCenter());
 		const Vec3 vOrigin = pPlayer->GetAbsOrigin();
 		GlowItem it{ pPlayer };
-		GlowColor(bVisible ? g_glowVisColor : g_glowInvisColor, it.c, g_glowWaveSize * (vOrigin.x + vOrigin.y) / 512.f);
+		const float flCos = cosf(g_glowWaveAngle * 0.017453293f), flSin = sinf(g_glowWaveAngle * 0.017453293f);
+		GlowColor(bVisible ? g_glowVisColor : g_glowInvisColor, it.c,
+		          g_glowWaveSize * (vOrigin.x * (flCos - flSin) + vOrigin.y * (flSin + flCos)) / 512.f);
 		it.c[3] *= flPulse;
 		const int idx = pPlayer->entindex();
 		if (idx > 0 && idx < 128) aItemOfPlayer[idx] = (int)s_glowItems.size();

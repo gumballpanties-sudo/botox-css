@@ -374,6 +374,12 @@ static const CfgEntry kEntries[] = {
     { "fpsBoost",         CfgEntry::BOOL,   &g_fpsBoost, 0 },
     { "removeScreenEffects", CfgEntry::BOOL, &g_removeScreenEffects, 0 },
     { "flipWorld",        CfgEntry::BOOL,   &g_flipWorld, 0 },
+    { "rearMirror",         CfgEntry::BOOL,  &g_rearMirror, 0 },
+    { "rearMirrorWidth",    CfgEntry::INT,   &g_rearMirrorWidth, 0 },
+    { "rearMirrorHeight",   CfgEntry::INT,   &g_rearMirrorHeight, 0 },
+    { "rearMirrorFov",      CfgEntry::FLOAT, &g_rearMirrorFov, 0 },
+    { "rearMirrorRounding", CfgEntry::FLOAT, &g_rearMirrorRounding, 0 },
+    { "rearMirrorFlip",     CfgEntry::BOOL,  &g_rearMirrorFlip, 0 },
 
     { "lagResolver",      CfgEntry::BOOL,   &g_lagResolver, 0 },
     { "lrYaw",            CfgEntry::BOOL,   &g_lrYaw, 0 },
@@ -666,6 +672,8 @@ static const CfgEntry kEntries[] = {
     // kept -- real CS feature, still used by practice.inl PrBot(), see report KEPT EXTRAS.
 
     { "espEnable",               CfgEntry::BOOL,   &g_espEnable, 0 },
+    { "espKey",                  CfgEntry::INT,    &g_espKey, 0 },
+    { "espKeyMode",              CfgEntry::INT,    &g_espKeyMode, 0 },
     { "espPreview",              CfgEntry::BOOL,   &g_espPreview, 0 },
     { "espTeammates",            CfgEntry::BOOL,   &g_espTeammates, 0 },
     { "espMaxDistance",          CfgEntry::FLOAT,  &g_espMaxDistance, 0 },
@@ -823,6 +831,7 @@ static const CfgEntry kEntries[] = {
     { "glowWaveSize",           CfgEntry::FLOAT,  &g_glowWaveSize, 0 },
     { "glowWaveStrength",       CfgEntry::FLOAT,  &g_glowWaveStrength, 0 },
     { "glowWavePlayer",         CfgEntry::BOOL,   &g_glowWavePlayer, 0 },
+    { "glowWaveAngle",          CfgEntry::FLOAT,  &g_glowWaveAngle, 0 },
     { "glowPulse",              CfgEntry::BOOL,   &g_glowPulse, 0 },
     { "glowPulseSpeed",         CfgEntry::FLOAT,  &g_glowPulseSpeed, 0 },
     { "glowPulseMin",           CfgEntry::FLOAT,  &g_glowPulseMin, 0 },

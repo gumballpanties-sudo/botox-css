@@ -19,6 +19,7 @@ float4 c10 : register( c10 );
 float4 c11 : register( c11 );
 float4 c12 : register( c12 );   // outline wave: on, phase, 1/size, strength
 float4 c13 : register( c13 );   // outline wave colour
+float4 c14 : register( c14 );   // wave angle: glow cos sin, outline cos sin
 float4 c15 : register( c15 );   // wave anchor: glow on, player box count, outline on
 float4 pb[32] : register( c16 );   // per player: uv box x0 y0 x1 y1
 float4 po[32] : register( c48 );   // per player: wave phase offset
@@ -26,18 +27,21 @@ float4 po[32] : register( c48 );   // per player: wave phase offset
 float2 cls( float2 m ) { float v = step( m.g, m.r ); return step( 0.5, m.r + m.g ) * float2( v, 1.0 - v ); }
 
 // wave coordinate: screen diagonal, or (on) height along the nearest player's box (0 head .. 1 feet) plus
-// that player's phase offset, so the sweep rides the body and turning the view never slides it
-float wpos( float2 uv, float on )
+// that player's phase offset, so the sweep rides the body and turning the view never slides it.
+// r = cos sin of the angle slider, turns that direction; x in screen-height / body-height units so bands stay square
+float wpos( float2 uv, float on, float2 r )
 {
-	float t = uv.x * c0.y / c0.x + uv.y;
+	float a = c0.y / c0.x;
+	float t = dot( float2( uv.x * a, uv.y ), float2( r.x - r.y, r.y + r.x ) );
 	if ( on < 0.5 || c15.y < 0.5 ) return t;
 	float best = 1e9;
 	[loop] for ( int i = 0; i < 32; i++ ) {
 		if ( i >= c15.y ) break;
 		float4 b = pb[i];
 		float2 e = max( b.zw - b.xy, 1e-4 );
-		float m = max( abs( uv.x - ( b.x + b.z ) * 0.5 ) / e.x, abs( uv.y - ( b.y + b.w ) * 0.5 ) / e.y );
-		if ( m < best ) { best = m; t = ( uv.y - b.y ) / e.y + po[i].x; }
+		float2 d = uv - ( b.xy + b.zw ) * 0.5;
+		float m = max( abs( d.x ) / e.x, abs( d.y ) / e.y );
+		if ( m < best ) { best = m; t = dot( float2( d.x * a, d.y ) / e.y, float2( -r.y, r.x ) ) + 0.5 + po[i].x; }
 	}
 	return t;
 }
@@ -107,7 +111,7 @@ float4 ps_glow( float2 uv : TEXCOORD0 ) : COLOR0
 	float g = saturate( ( a - c7.x ) * c7.y );
 	float4 v = lerp( float4( c5.rgb * c5.a, c5.a ), float4( c3.rgb * c3.a, c3.a ), g );
 	float4 h = lerp( float4( c6.rgb * c6.a, c6.a ), float4( c4.rgb * c4.a, c4.a ), g );
-	float w = 0.5 + 0.5 * cos( 6.2831853 * ( wpos( uv, c15.x ) * c8.z - c8.y ) );
+	float w = 0.5 + 0.5 * cos( 6.2831853 * ( wpos( uv, c15.x, c14.xy ) * c8.z - c8.y ) );
 	float k = w * w * w * c8.w * c8.x;
 	v.rgb = lerp( v.rgb, c9.rgb * v.a, k );
 	h.rgb = lerp( h.rgb, c9.rgb * h.a, k );
@@ -147,7 +151,7 @@ float4 ps_columns( float2 uv : TEXCOORD0 ) : COLOR0
 {
 	float3 k = dist( uv );
 	float4 col = lerp( c2, c1, saturate( 0.5 + 0.5 * ( k.y - k.x ) ) );
-	float w = 0.5 + 0.5 * cos( 6.2831853 * ( wpos( uv, c15.z ) * c12.z - c12.y ) );
+	float w = 0.5 + 0.5 * cos( 6.2831853 * ( wpos( uv, c15.z, c14.zw ) * c12.z - c12.y ) );
 	col.rgb = lerp( col.rgb, c13.rgb, w * w * w * c12.w * c12.x );
 	return float4( col.rgb, col.a * saturate( c0.w + 1.0 - min( k.x, k.y ) ) * ( 1.0 - k.z ) );
 }

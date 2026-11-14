@@ -9,6 +9,7 @@
     { "esxStencilWaveSize",       CfgEntry::FLOAT,  &g_esxStencilWaveSize, 0 },
     { "esxStencilWaveStrength",   CfgEntry::FLOAT,  &g_esxStencilWaveStrength, 0 },
     { "esxStencilWavePlayer",     CfgEntry::BOOL,   &g_esxStencilWavePlayer, 0 },
+    { "esxStencilWaveAngle",      CfgEntry::FLOAT,  &g_esxStencilWaveAngle, 0 },
     { "esxInnerGlow",             CfgEntry::BOOL,   &g_esxInnerGlow, 0 },
     { "esxInnerGlowVisColor",     CfgEntry::FLOAT4, g_esxInnerGlowVisColor, 0 },
     { "esxInnerGlowInvisColor",   CfgEntry::FLOAT4, g_esxInnerGlowInvisColor, 0 },

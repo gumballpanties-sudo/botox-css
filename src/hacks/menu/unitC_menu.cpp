@@ -29,6 +29,9 @@ void UnitC_Menu_visuals_esp()
     ImGui::Checkbox("players", &g_espEnable);
     if (g_espEnable) {
         ImGui::OptionPopup("esp settings##player esp settings", [&]() {
+            ImGui::Label("esp keybind");
+            ImGui::Keybind("esp key##players", &g_espKey, &g_espKeyMode);
+
             ImGui::Checkbox("include teammates", &g_espTeammates);
             ImGui::SliderFloat("max distance##player esp", &g_espMaxDistance, 0.f, 6000.f, "%.0f u", ImGuiSliderFlags_AlwaysClamp);
             if (g_espMaxDistance > 0.f)
@@ -203,8 +206,10 @@ void UnitC_Menu_visuals_esp()
                 if (!legacy)
                     ImGui::SliderFloat("wave size##player glow wave", &g_glowWaveSize, 0.05f, 2.f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
                 ImGui::SliderFloat("wave strength##player glow wave", &g_glowWaveStrength, 0.f, 1.f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
-                if (!legacy)
+                if (!legacy) {
+                    ImGui::SliderFloat("wave angle##player glow wave", &g_glowWaveAngle, -180.f, 180.f, "%.0f deg", ImGuiSliderFlags_AlwaysClamp);
                     ImGui::Checkbox("follow player##player glow wave", &g_glowWavePlayer);
+                }
             }
 
             ImGui::Checkbox("edge pulse##player glow", &g_glowPulse);
@@ -241,6 +246,7 @@ void UnitC_Menu_visuals_esp()
                 ImGui::SliderFloat("wave speed##player stencil wave", &g_esxStencilWaveSpeed, 0.05f, 4.f, "%.2fx", ImGuiSliderFlags_AlwaysClamp);
                 ImGui::SliderFloat("wave size##player stencil wave", &g_esxStencilWaveSize, 0.05f, 2.f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
                 ImGui::SliderFloat("wave strength##player stencil wave", &g_esxStencilWaveStrength, 0.f, 1.f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+                ImGui::SliderFloat("wave angle##player stencil wave", &g_esxStencilWaveAngle, -180.f, 180.f, "%.0f deg", ImGuiSliderFlags_AlwaysClamp);
                 ImGui::Checkbox("follow player##player stencil wave", &g_esxStencilWavePlayer);
             }
         }, ImVec2(220.f, -1));

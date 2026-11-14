@@ -3,6 +3,7 @@
 #include "../visuals/visuals.h"      // CachedCVar -- mat_queue_mode
 #include "../movement/movement.h"     // Vec3 -- the focus trace's origin and angles come off the view setup
 #include "../visuals/flipworld.h"    // FlipWorld_Render -- mirrored at the end of the post slot
+#include "../visuals/rear_mirror.h"  // RearMirror_Drawing -- the back view runs none of the passes
 #include "../visuals/chams_api.h"    // Glow_Render -- ref glow pass, before the original post slot
 #include "shaders/fx_probe.h"     // k_fxProbeBytes    -- compiled from fx_probe.hlsl by fxc
 #include "shaders/fx_quad_vs.h"   // k_fxQuadVsBytes   -- compiled from fx_quad_vs.hlsl by fxc
@@ -1516,6 +1517,9 @@ static void __fastcall h_ViewDrawFade(void* thisptr, unsigned char* color, void*
 
     o_ViewDrawFade(thisptr, color, material);
 
+    if (RearMirror_Drawing())
+        return;
+
     // Flip world (either DLL) mirrors before DrawViewModels, so the gun's colour and its 0..0.1 depth slice
     // are both unmirrored here: the gun's blur mask lines up either way.
     if (!g_eject && ((g_dofEnable && !g_dofViewmodelSharp) || (g_fbEnable && g_fbViewmodel)))
@@ -1765,6 +1769,9 @@ static void FxReadViewSetup(const void* setup)
 static bool __fastcall h_DoPostScreenSpaceEffects(void* thisptr, const void* setup)
 {
     MiscHookGuard _g;
+
+    if (RearMirror_Drawing())
+        return o_DoPostSSE(thisptr, setup);
 
     const DWORD tid = GetCurrentThreadId();
 

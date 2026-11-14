@@ -13,6 +13,7 @@ inline float g_esxStencilWaveSpeed = 0.5f;
 inline float g_esxStencilWaveSize = 0.35f;
 inline float g_esxStencilWaveStrength = 0.8f;
 inline bool  g_esxStencilWavePlayer = true;                             // wave rides each player's body, not the screen
+inline float g_esxStencilWaveAngle = 0.f;                               // deg, turns the wave direction
 
 inline bool  g_esxInnerGlow = false;                                    // m_inner_glow
 inline float g_esxInnerGlowVisColor[4]   = { 1.f, 1.f, 1.f, 200 / 255.f };

@@ -30,6 +30,7 @@ struct PlayerStencilSettings
 	// boxes = ndc bounds per player (x0 y0 x1 y1, main thread) -> c16.., phase offsets -> c48..
 	static constexpr int kMaxBoxes = 32;
 	float waveAnchor[4] = {};
+	float waveAngle[4] = { 1.f, 0.f, 1.f, 0.f };               // c14: glow cos sin, outline cos sin (angle slider)
 	float boxes[kMaxBoxes][4] = {}, boxPhase[kMaxBoxes][4] = {};
 	float innerReach[4] = {};                                  // c7 for the inner passes: intensity, -, size
 	int   nCapsules = 0;

@@ -11,6 +11,7 @@
 #include "world_fx.h"     // WorldFx_Tick -- unit D: fullbright + disable interp pokes
 #include "world_fx2.h"    // WorldFx2_Tick/_OnFindMaterial -- unit D2: dlight, sun angle, tints
 #include "mc_world.h"     // MCWorld_OnSkyBoxDrawn -- minecraft sky behind the 2D sky draw
+#include "rear_mirror.h"  // RearMirror_Drawing -- the back view draws plain models, no mc sky
 #include "../misc/game_extras.h"   // ChatTranslator_OnUserMessage -- unit game, DispatchUserMessage
 #include "../misc/game_pure.h"     // n_game::SayMsg/ParseSayText(2)/PickChatLine -- pure parsing, no SDK types
 #include "../aim/css_bridge.h"     // CssBridge_DispatchChat (SDK2/BRIDGE 11-03)
@@ -358,7 +359,7 @@ void __fastcall h_R_DrawSkyBox(float zFar, int nDrawFlags)
     }
     // minecraft sky: right behind this view's 2D sky draw (botox mc_clouds' point), z-tested so
     // it only lands where nothing opaque is, whichever side of the world the engine draws sky
-    if (!g_eject && g_mcWorldEnable) MCWorld_OnSkyBoxDrawn();
+    if (!g_eject && g_mcWorldEnable && !RearMirror_Drawing()) MCWorld_OnSkyBoxDrawn();
 }
 
 // ==== CS:GO viewmodel bob / gun lower / landing dip =====================================
@@ -895,6 +896,11 @@ static void __fastcall h_DrawModelExecute_impl(void* rcx, const void* pState, co
     // valid entity_index -- Css_ClassnameIs covers the one case that matters here.
     if (wantNoRagdoll && entIdx > 0 && Css_ClassnameIs(entIdx, "CCSRagdoll"))
         return;   // skip the draw entirely, same as should_skip_ragdoll's return path
+
+    if (RearMirror_Drawing()) {
+        o_DrawModelExecute(rcx, pState, pInfo, pBones);
+        return;
+    }
 
     // Glow pass (aim/chams.cpp Glow_Render) drawing its silhouettes through CBaseEntity::DrawModel:
     // after no-hats (a hidden hat must not glow), before everything else -- the engine's own draw,

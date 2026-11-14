@@ -97,6 +97,7 @@ add_library(botox SHARED
     src/hacks/visuals/lsd_chams.cpp
     src/hacks/visuals/player_stencil.cpp
     src/hacks/visuals/esp_preview_tex.cpp
+    src/hacks/visuals/rear_mirror.cpp
     src/dependencies/lua/lua_unity.cpp
     src/hacks/lua/lua.cpp
     src/hacks/lua/lua_api.cpp

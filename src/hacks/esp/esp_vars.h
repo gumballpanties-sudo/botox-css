@@ -6,6 +6,9 @@
 
 // ---- players (botox "players" group) ----
 extern bool  g_espEnable;              // m_players
+extern int   g_espKey;                 // m_players_key: mode 0 always on (default), 1 hold, 2 toggle
+extern int   g_espKeyMode;
+bool Esp_On();                         // g_espEnable + bind; mode 0 / no key = on, menu open too. Preview ignores it
 extern bool  g_espTeammates;
 extern float g_espMaxDistance;         // 0 = no limit
 extern bool  g_espDistanceFade;        // fades over the last quarter of max distance

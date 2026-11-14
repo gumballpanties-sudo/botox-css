@@ -523,6 +523,14 @@ bool g_removeScreenEffects = false; // swallow Shake/Fade/Rumble user messages
 // -- Flip world (flipworld.cpp) -- mirror the 3D frame, the HUD's world anchors, the hand + input --
 bool g_flipWorld = false;
 
+// -- Rear view mirror (rear_mirror.cpp) --
+bool  g_rearMirror         = false;
+int   g_rearMirrorWidth    = 360;
+int   g_rearMirrorHeight   = 120;
+float g_rearMirrorFov      = 90.f;
+float g_rearMirrorRounding = 10.f;
+bool  g_rearMirrorFlip     = true;
+
 // -- Lag resolver (lagres.cpp) -- draw a laggy player smooth instead of frozen-then-jumped --
 bool  g_lagResolver = false;  // off by default: it trades a little accuracy for no twitch
 bool  g_lrYaw       = true;   // smooth the model's yaw too, not just his position
@@ -741,6 +749,19 @@ std::atomic<int> g_prMenuReq{0};
 
 // -- Unit C: ESP (src/hacks/aim/esp.cpp, extern list hacks/esp/esp_vars.h) -- botox defaults --
 bool  g_espEnable = false;
+int   g_espKey = 0;
+int   g_espKeyMode = 0;
+
+// botox n_players::esp_on: always / no key = on (menu open too), else world_fx ThirdPersonKey's read
+bool Esp_On()
+{
+    if (!g_espEnable) return false;
+    if ((g_espKeyMode != 1 && g_espKeyMode != 2) || g_espKey <= 0 || g_espKey > 255) return true;
+    if (g_hwnd && GetForegroundWindow() != g_hwnd) return false;
+    return g_espKeyMode == 1 ? (GetAsyncKeyState(g_espKey) & 0x8000) != 0
+                             : (GetKeyState(g_espKey) & 1) != 0;
+}
+
 bool  g_espPreview = false;   // visuals > esp "esp preview" checkbox, src/hacks/visuals/esp_preview.h
 bool  g_espTeammates = false;
 float g_espMaxDistance = 0.f;
@@ -908,6 +929,7 @@ float g_glowWaveSpeed = 0.5f;
 float g_glowWaveSize = 0.35f;
 float g_glowWaveStrength = 0.8f;
 bool  g_glowWavePlayer = true;
+float g_glowWaveAngle = 0.f;
 bool  g_glowPulse = false;
 float g_glowPulseSpeed = 1.f;
 float g_glowPulseMin = 35.f;

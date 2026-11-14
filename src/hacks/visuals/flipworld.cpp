@@ -1,5 +1,6 @@
 #include "../../globals/globals.h"
 #include "flipworld.h"
+#include "rear_mirror.h"   // RearMirror_Drawing: the back view's 2d push is not the frame's
 #include "../screen/screenfx.h"   // ScreenFx_FindClientMode
 #include "visuals.h"    // Chams_LevelInit/LevelUnload -- piggybacked on this file's LevelInit hook
 #include "world_fx3.h"  // WorldFx3_LevelShutdown
@@ -591,7 +592,7 @@ static void __fastcall h_FlipWriteVars(void* rcx, void* buffer, bool allVars)
 static void __fastcall h_FlipPush2D(void* rcx, const void* view, int flags, void* rt, void* frustum)
 {
     MiscHookGuard _g;
-    if (OnGameThread()) {
+    if (OnGameThread() && !RearMirror_Drawing()) {
         FlipLock _l;
         FlipTrackTwoD(s_core.track);
         FlipPublish();

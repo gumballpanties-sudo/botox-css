@@ -22,6 +22,7 @@
 #include "../hacks/visuals/world_fx3.h"   // unit world: eject restore (ragdoll proxy, cvars, modulation)
 #include "fsn.h"
 #include "../hacks/visuals/flipworld.h"
+#include "../hacks/visuals/rear_mirror.h"
 #include "../hacks/hud/mediaplayer.h"
 #include "../hacks/misc/misc_overlays.h"   // unit misc: ConsoleTint_Install
 #include "../hacks/misc/discord_ex.h"   // unit E: discord rich presence, its own IPC thread
@@ -335,6 +336,9 @@ static void PollThread()
             // Flip world: WorldToScreenMatrix (HUD), ClientModeShared::CreateMove (A/D + hand),
             // CViewRender::LevelInit (its RT). The mirror itself rides screenfx's two hooks above.
             FlipWorld_Install();
+
+            // CViewRender::RenderView (slot 6) -- visuals rear view mirror, a back view before the main one
+            RearMirror_Install(ViewRenderSlot(hClient));
 
             // Shared engine FrameStageNotify hook (web/extras/flipworld/net/demo/recorder).
             // No skins in CSS: the skinchanger that used to own this hook is gone (see report).

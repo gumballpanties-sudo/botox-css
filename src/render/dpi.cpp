@@ -32,7 +32,8 @@ ImVec2 Dpi_ScreenMouse() { return s_mouse; }
 static bool StretchedWindow(const ImGuiWindow* w)
 {
     const char* n = w->Name;
-    return strstr(n, "botox-spectators") || !strcmp(n, "botox-route-calc-keys") || !strcmp(n, "##mr_clipper_box");
+    return strstr(n, "botox-spectators") || !strcmp(n, "botox-route-calc-keys") || !strcmp(n, "##mr_clipper_box") ||
+           !strcmp(n, "botox-rear-mirror");
 }
 
 static bool WindowUnscaled(const ImGuiWindow* root)

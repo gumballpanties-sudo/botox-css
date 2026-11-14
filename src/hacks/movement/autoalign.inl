@@ -1,6 +1,6 @@
 // autoalign.inl -- auto align = botox csgo-sdk hacks/movement/auto_align.cpp 1:1 again (11-08b), plus the
 // CSS "hold pixel surfs" layer (g_aaHoldSurf, 11-08). Textually included by movement.cpp after
-// pixelsurf.inl (uses its PsWishWorld / PsPressInto / TraceFilterWorldOnly).
+// pixelsurf.inl (uses its PsWishWorld / PsPressInto).
 //
 // Why back to botox: the 11-07 rewrite (press = PsPressInto at 450, no sim) parks the hull 0.03125 off
 // the plane like any hard hit, where no seam pin exists; botox instead SEARCHES the press that pins this
@@ -8,10 +8,11 @@
 // |vz - pin| < 1e-3 and a CSS clipped vz sits at pin + 1/32 (ref clip nudge). Every pin test here goes
 // through IsTargetVz (movement.cpp: pin, pin +- 1/32).
 //
-// botox order per air wall tick: wall scan (16 x 1u hull rays) -> tb key held = hands off -> [CSS: hold
+// botox order per air wall tick: wall scan (16 x 1u hull rays, prop face = hands off) -> tb key held = hands off -> [CSS: hold
 // pixel surfs] -> steering away = hands off -> leaving over the lip = hands off -> YOUR OWN MOVE RIDES =
 // keep it -> fine ulp dx ladder -> coarse 10..90 pin loop -> park / unstick / keep (flush) -> contact loop
-// -> along-wall keys speed branch -> fix air stucks. CSS 11-08 22:45: no lip / pixel surf gate (user: keep
+// -> along-wall keys speed branch -> fix air stucks -> AaGuard (our cmd stalls, yours
+// doesn't = yours). CSS 11-08 22:45: no lip / pixel surf gate (user: keep
 // the tb stick). AA: rides= / tbpin= = how many 1-tick sim pins also hold a 2nd tick (diag only).
 //
 // CSS mapping (disclosed):
@@ -48,7 +49,7 @@ namespace aa
     // fewer, hpress = none pins, pressed in anyway. mis = the sent hold said "pins next tick" and START
     // did not; blind = said nothing pins, START did
     enum Out { o_near, o_face, o_tb, o_away, o_angle, o_lip, o_pin, o_fine, o_park, o_unstick, o_keep, o_touch, o_miss,
-               o_slant, o_poff, o_stuckfix, o_hold, o_hold1, o_hpress, o_mis, o_blind, o_rides, o_tbpin, o_count };
+               o_slant, o_poff, o_stuckfix, o_hold, o_hold1, o_hpress, o_mis, o_blind, o_rides, o_tbpin, o_prop, o_guard, o_count };
     int s_outs[o_count] = {};
 
     struct Budget
@@ -524,7 +525,9 @@ static bool AaHoldTick(void* pLocal, UserCmd_t* cmd, const Vec3& n, float h, boo
     return false;
 }
 
-static void AutoAlign(void* pLocal, UserCmd_t* cmd)
+static bool s_aaWedge = false;   // this tick's wall can wedge the AABB (slanted / prop): only then AaGuard runs
+
+static void AutoAlignBotox(void* pLocal, UserCmd_t* cmd)
 {
     using namespace aa;
     s_aaWallDetected = false;
@@ -554,10 +557,10 @@ static void AutoAlign(void* pLocal, UserCmd_t* cmd)
         if (!g_debugLogEnable || sec == s_sec) return;
         s_sec = sec;
         DebugLog("AA: near=%d face=%d tb=%d away=%d angle=%d lip=%d pin=%d fine=%d park=%d unstick=%d keep=%d touch=%d miss=%d slant=%d poff=%d stuckfix=%d"
-                 " | hold=%d short=%d hpress=%d mis=%d blind=%d hsims=%d rides=%d tbpin=%d",
+                 " prop=%d guard=%d | hold=%d short=%d hpress=%d mis=%d blind=%d hsims=%d rides=%d tbpin=%d",
                  s_outs[o_near], s_outs[o_face], s_outs[o_tb], s_outs[o_away], s_outs[o_angle], s_outs[o_lip],
                  s_outs[o_pin], s_outs[o_fine], s_outs[o_park], s_outs[o_unstick], s_outs[o_keep], s_outs[o_touch], s_outs[o_miss],
-                 s_outs[o_slant], s_outs[o_poff], s_outs[o_stuckfix],
+                 s_outs[o_slant], s_outs[o_poff], s_outs[o_stuckfix], s_outs[o_prop], s_outs[o_guard],
                  s_outs[o_hold], s_outs[o_hold1], s_outs[o_hpress], s_outs[o_mis], s_outs[o_blind], s_holdSims, s_outs[o_rides], s_outs[o_tbpin]);
         for (int& o : s_outs) o = 0;
         s_holdSims = 0;
@@ -568,7 +571,8 @@ static void AutoAlign(void* pLocal, UserCmd_t* cmd)
     const float step = maxRadians / 16.f;
     const Vec3 startPos = EntV3(pLocal, g_offOrigin);
     const Vec3 mins = EntV3(pLocal, g_offMins), maxs = EntV3(pLocal, g_offMaxs);
-    TraceFilterWorldOnly fil; fil.Setup();
+    // what ProcessMovement hits: world-only skipped props + brush ents, the sims don't
+    TraceFilterWorldProps fil; fil.Setup(pLocal);
 
     static float startCircle = 0.f;
     static float warmFwd = 0.f, warmSide = 0.f;
@@ -593,29 +597,44 @@ static void AutoAlign(void* pLocal, UserCmd_t* cmd)
         }
     }
 
-    // all 16 from last tick's wall angle, wrapping: a corner's lower angle used to cost a tick + the warm move
+    // all 16 from last tick's wall angle, wrapping: a corner's lower angle used to cost a tick + the warm move.
+    // first brush wall wins, no early out: a prop face anywhere in the ring = hands off below
+    bool propNear = false;
+    const float circle0 = startCircle;   // the ring walks from here even after the wall moves startCircle
     for (int s = 0; s < 16; s++)
     {
-        const float a = fmodf(startCircle + step * static_cast<float>(s), maxRadians);
+        const float a = fmodf(circle0 + step * static_cast<float>(s), maxRadians);
         const float ca = cosf(a), sa = sinf(a);
-        const Vec3 endPos(startPos.x + ca, startPos.y + sa, startPos.z);
-        savedCos = ca * 64.f; savedSin = sa * 64.f;
-        trace = GameTrace_t{};
-        TraceHull(startPos, endPos, mins, maxs, MASK_PLAYERSOLID, &fil, &trace);
-        if (trace.fraction != 1.f && trace.plane.normal.z == 0.f)
+        GameTrace_t tr{};
+        TraceHull(startPos, Vec3(startPos.x + ca, startPos.y + sa, startPos.z), mins, maxs, MASK_PLAYERSOLID, &fil, &tr);
+        if (tr.fraction == 1.f) continue;
+        if (MV_TraceIsProp(tr))
+        {
+            propNear |= tr.startsolid || fabsf(tr.plane.normal.z) < 0.7f;
+            continue;
+        }
+        if (!s_aaWallDetected && !tr.startsolid && tr.plane.normal.z == 0.f)   // startsolid = zero normal, no wall dir
         {
             s_aaWallDetected = true;
+            trace = tr;
             startCircle = a;
             saveStartPos = startPos;
-            break;
+            savedCos = ca * 64.f; savedSin = sa * 64.f;
         }
     }
+
+    // prop = .phy convex at any yaw (vphysics trace): a press meets it on a corner and can wedge. never the wall,
+    // no hand off (csgo 11-14 log: hand off cost pixel jumps), only wedge risk = AaGuard runs.
+    // ponytail: filter has no ShouldCollide, a walk-through debris prop also counts (guard sims only)
+    if (propNear) s_outs[o_prop]++;
 
     if (!s_aaWallDetected)
     {
         startCircle = 0.f; warmTick = -1; FlushDrop(); HoldRelease("noface"); s_outs[o_face]++; Diag();
         return;
     }
+    // slanted face = AABB corner contact, prop = corner too: an xy 0 pin there is a wedge, not a head-on surf
+    s_aaWedge = propNear || fminf(fabsf(trace.plane.normal.x), fabsf(trace.plane.normal.y)) > 1e-3f;
 
     // tb key held: tb's ladder / park run after us with flips + lookahead. wall_detected stays set for pixel_surf
     if (On(g_textureBug, g_textureBugKey, g_textureBugMode))
@@ -786,6 +805,8 @@ static void AutoAlign(void* pLocal, UserCmd_t* cmd)
         if (gapN > 2.f * (close > 0.f ? close : 0.f) + 0.5f) contactReachable = false;
     }
 
+    // contact loop runs on slanted faces too: the engine park (0.03125 off) sits outside every tighter lip.
+    // 11-14 csgo log: skipping it there held the hull 0.03115 off n -0.71 -0.71, lips missed. stucks = AaGuard's
     if (!detect && contactReachable)
     {
         for (int i = 5; i >= 1 && !spent(); i--)
@@ -978,4 +999,47 @@ static void AutoAlign(void* pLocal, UserCmd_t* cmd)
         }
     }
     Diag();
+}
+
+// air stuck = TryPlayerMove zeroed the move (allFraction 0, 3+ planes, crease reversal, end-pos stuck box) =
+// xy 0 (css: the 1/32 clip nudge), and FinishGravity's half step makes vz read as a pin: a corner wedged in a
+// prop / slanted face. our move stalls this tick or held one more where the cmd we got doesn't = the cmd we got back
+static bool AaGuard(void* pLocal, UserCmd_t* cmd, const UserCmd_t& got)
+{
+    if (cmd->forwardmove == got.forwardmove && cmd->sidemove == got.sidemove && cmd->buttons == got.buttons) return false;
+    if (SimsLeft() < 4) return false;
+    const int frame = PredCommandsPredicted() - 1;
+    const auto stalls = [&](const UserCmd_t& c) {
+        RestoreToFrame(frame);
+        for (int t = 0; t < 2; ++t)
+        {
+            UserCmd_t k = c;
+            Pred_Simulate(pLocal, &k);   // walks m_nTickBase itself
+            if (EntMoveType(pLocal) != MOVETYPE_WALK || (EntI(pLocal, g_offFlags) & FL_ONGROUND)) return false;
+            // vz too: a slow creep / park / corner crease is xy < 1 with a live vz, a wedge sits on the pin
+            const Vec3 v = EntV3(pLocal, g_offVelocity);
+            if (v.Length2D() < 1.f && IsTargetVz(v.z, aa::k_pinEps)) return true;
+        }
+        return false;
+    };
+    const bool back = stalls(*cmd) && !stalls(got);
+    RestoreToFrame(frame);
+    if (!back) return false;
+    cmd->forwardmove = got.forwardmove;
+    cmd->sidemove    = got.sidemove;
+    cmd->upmove      = got.upmove;   // the hold writes it too: send exactly the cmd simmed free
+    cmd->buttons     = got.buttons;
+    // the hold's press is gone: pixel surf / wall engine must not keep "AA's cmd", no mispredict read off it
+    s_aaHolding = false;
+    aa::s_expect = false;
+    return true;
+}
+
+static void AutoAlign(void* pLocal, UserCmd_t* cmd)
+{
+    const UserCmd_t got = *cmd;
+    s_aaWedge = false;
+    AutoAlignBotox(pLocal, cmd);
+    // square face, no prop = no wedge (a head-on surf is xy 0 too): native, no guard sims. reverted = never sent, no park verdict
+    if (s_aaWedge && AaGuard(pLocal, cmd, got)) { aa::s_outs[aa::o_guard]++; aa::FlushDrop(); }
 }

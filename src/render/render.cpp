@@ -34,6 +34,7 @@
 #include "../hacks/esp/esp_declutter.h"  // label stacks shoved apart before the replay (EspQ_Declutter)
 #include <unordered_map>
 #include "../hacks/visuals/esp_preview.h"   // EspPreview::DropTexture in h_Reset
+#include "../hacks/visuals/rear_mirror.h"   // RearMirror_Draw / RearMirror_DropTexture
 #include "../hacks/aim/esp_weapon_icons.h"   // ESPC_WPNICON resolve (plain globals.h types, aim TU safe)
 #include "../hacks/visuals/player_stencil.h"  // PlayerStencil_ReleaseTargets in h_Reset
 #include "../hacks/menu/fonts.h"          // fonts tab: indicator face picked at runtime
@@ -2139,6 +2140,7 @@ static void BuildImGuiFrame()
     Recorder_Render();           // unit B: path, route starts, timer, clipper box, clip editor
     Web_Present(g_d3dDev);       // raw d3d quads now, under every imgui list; grade already ran
     FloorLevel_World(g_d3dDev);  // check floor level's colored grid mesh, same raw-d3d-quad slot
+    RearMirror_Draw();           // botox on_end_scene: after Web_Present, before the menu
     RenderHudExtras();           // unit hud: aimbot fov circle + custom net graph
     RenderCrosshairList();       // own list: the one overlay drawn inside the game's frame
     RenderPracticeWindow();      // botox on_end_scene: practice window, then spectator list
@@ -2622,6 +2624,7 @@ HRESULT __stdcall h_Reset(IDirect3DDevice9* dev, D3DPRESENT_PARAMETERS* pp) {
     Avatar_ReleaseAll();               // unit E5: avatar textures are DEFAULT-pool too
     PlayerStencil_ReleaseTargets();    // esp unit: player stencil mask/blur targets, DEFAULT-pool
     EspPreview::DropTexture();         // esp preview: its target is remade, the d3d texture with it
+    RearMirror_DropTexture();          // rear view mirror: same
     EspWeaponIcon_ReleaseAll();        // esp weapon glyphs: DEFAULT-pool, a live one fails the Reset; recached on next draw
     GifTex_ReleaseAll();               // unit E5: gif frame texture, GDI+ bitmap survives the reset
     SpectatorList_ReleaseTextures();   // spec unit: eyes style row textures, DEFAULT-pool

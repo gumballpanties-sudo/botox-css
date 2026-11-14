@@ -1,6 +1,7 @@
 #include "world_fx3.h"
 #include "world_fx3_math.h"
 #include "visuals.h"                   // CachedCVar
+#include "rear_mirror.h"               // RearMirror_Drawing -- lamps recorded off the main view only
 #include "../movement/movement.h"      // Vec3, AngleVectors, Ray_mv, GameTrace_t, kTrace_TraceRay
 #include "../movement/prediction.h"    // g_globalVars
 #include "../../render/render.h"       // W2S_Project
@@ -422,7 +423,7 @@ static DrawStaticProps_t o_DrawStaticProps = nullptr;
 static void __fastcall h_DrawStaticProps(void* rcx, void** props, int count, bool shadowDepth, bool wireframe)
 {
     MiscHookGuard _g;
-    if (g_wdLightMod && g_wdLightModLamps && !g_eject && !shadowDepth && props && count > 0)
+    if (g_wdLightMod && g_wdLightModLamps && !g_eject && !shadowDepth && props && count > 0 && !RearMirror_Drawing())
         Lamps_Record(props, count);
     o_DrawStaticProps(rcx, props, count, shadowDepth, wireframe);
 }
