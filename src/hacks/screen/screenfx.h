@@ -18,6 +18,10 @@
 // different depth and the probe has to name the one it read.
 void ScreenFx_Frame(IDirect3DDevice9* dev, bool fromPostSlot = false);
 
+// The half after the web screen (frame blend's world pass), botox post slot order. Same thread
+// rules as ScreenFx_Frame; no-op unless ScreenFx_Frame drew its passes this frame.
+void ScreenFx_FrameLate(IDirect3DDevice9* dev);
+
 // Every D3DPOOL_DEFAULT resource. Dropped before Reset and at eject.
 void ScreenFx_Destroy();
 

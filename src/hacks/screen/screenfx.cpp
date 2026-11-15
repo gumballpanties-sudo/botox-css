@@ -11,7 +11,8 @@
 #include "../visuals/mc_world.h"      // unit D3: MCWorld_UpdateView -- cloud drift off this view setup
 #include "../visuals/lsd_chams.h"     // WeaponSheen_Destroy in ScreenFx_Destroy
 #include "screenfx_passes.h" // ScreenFxPasses_DepthView -- emphasize/show depth, same draw point
-#include "../web/websurface.h"  // Web_OnPostScreenSpaceEffects -- botox do_post_screen_space_effects.cpp:49
+#include "../web/websurface.h"  // Web_OnPostScreenSpaceEffects -- botox do_post_screen_space_effects.cpp:58
+#include "bloom.h"              // Bloom_Frame -- tail of the gun pass (botox: after motion blur, before hud)
 
 // ==== the depth source ==============================================================
 // Ported from coldtires (hacks/visuals/screen/depth_source.{h,cpp}). Two routes, both
@@ -125,6 +126,7 @@ static int  s_resolvedFrm  = -1;                  // one resolve per frame, whoe
 static int  s_bbScene      = 0;                   // backbuffer scenes seen so far this frame
 static bool s_inOurResolve = false;               // our RESZ, not the engine's -- see h_SetRenderState
 static int  s_vmFrame      = -1;                  // frame the viewmodel pass has run for
+static int  s_lateFrm      = -1;                  // frame the early passes ran: ScreenFx_FrameLate owes it fb
 
 // ---- the pre-translucent frame ---------------------------------------------------------
 // The colour buffer as it stood when the last opaque pixel was written. Everything that
@@ -501,6 +503,7 @@ void ScreenFx_Destroy()
     s_preFmt   = D3DFMT_UNKNOWN;
     s_preFrame = -1;
     s_vmFrame  = -1;
+    s_lateFrm  = -1;
 }
 
 // Our own INTZ at frame size, plus the probe's targets. False = there is no depth route
@@ -772,10 +775,19 @@ static void __fastcall FxFn_Call(void*)
 
 // The gun's pass, queued the same way from IVRenderView::ViewDrawFade. Its own functor
 // because the queue calls operator() with nothing to say which site put it there.
+// Bloom rides at its tail: after the gun's motion blur, before the hud (botox post slot order).
 static void __fastcall FxFn_CallVm(void*)
 {
     s_cqRan = true;
     ScreenFx_ViewmodelFrame(g_d3dDev);
+    Bloom_Frame(g_d3dDev);
+}
+
+// The late half (fb), queued from the post slot after the web screen.
+static void __fastcall FxFn_CallLate(void*)
+{
+    s_cqRan = true;
+    ScreenFx_FrameLate(g_d3dDev);
 }
 
 static void* s_fxFnVt[4] = {
@@ -784,8 +796,12 @@ static void* s_fxFnVt[4] = {
 static void* s_fxFnVmVt[4] = {
     (void*)&FxFn_AddRef, (void*)&FxFn_Release, (void*)&FxFn_Dtor, (void*)&FxFn_CallVm
 };
-static FxFunctor s_fxFunctor   = { s_fxFnVt,   0 };
-static FxFunctor s_fxFunctorVm = { s_fxFnVmVt, 1 };
+static void* s_fxFnLateVt[4] = {
+    (void*)&FxFn_AddRef, (void*)&FxFn_Release, (void*)&FxFn_Dtor, (void*)&FxFn_CallLate
+};
+static FxFunctor s_fxFunctor     = { s_fxFnVt,     0 };
+static FxFunctor s_fxFunctorVm   = { s_fxFnVmVt,   1 };
+static FxFunctor s_fxFunctorLate = { s_fxFnLateVt, 2 };
 
 // Main thread, from the post slot. False = no queue (single threaded already, or the slots
 // did not lead anywhere), and the EndScene fallback stands.
@@ -1257,7 +1273,6 @@ void ScreenFx_Frame(IDirect3DDevice9* dev, bool fromPostSlot)
 {
     const bool wantAo    = g_aoEnable;
     const bool wantDof   = g_dofEnable;
-    const bool wantFb    = g_fbEnable;
     const bool wantProbe = g_fxDepthProbe;
     const bool wantRefl  = g_reflEnable;                          // unit D3
     const bool wantDv    = g_emphasizeEnable || g_showDepthEnable; // botox depth_view
@@ -1380,23 +1395,17 @@ void ScreenFx_Frame(IDirect3DDevice9* dev, bool fromPostSlot)
         if (first && wantPass && rt && FxHealthStep(dev, fromPostSlot))
         {
             if (ScreenFx_View(view)) {
-                // botox's own DoPostScreenSpaceEffects order: depth view, reflections, ao, dof,
-                // motion blur. Reflections ahead of ao/dof so they never shade a mirror image
-                // that itself still needs occlusion and a focus blur.
+                // botox do_post_screen_space_effects.cpp order: depth view, reflections, ao,
+                // depth warp, dof | web screen | true motion blur, bloom | flip world.
+                // This is the half before the web screen; ScreenFx_FrameLate is the half after.
                 if (wantDv)   ScreenFxPasses_DepthView(dev, rt, desc, ScreenFx_DepthTexture(), view);
                 if (wantRefl) Reflections_Draw(dev, rt, desc, ScreenFx_DepthTexture(), view);
-                // OCCLUSION FIRST. It belongs on sharp geometry: the other way round the
-                // blur would be finished before the creases were drawn, and every shadow
-                // would come out pin sharp on top of an out of focus wall.
-                if (wantAo)  Ssao_Draw(dev, rt, desc, ScreenFx_DepthTexture(), view);
-                // Then the lens, the way a camera has them: the lens decides what is sharp.
-                if (wantDof) Dof_Draw(dev, rt, desc, ScreenFx_DepthTexture(), view);
-                // AND THE SHUTTER LAST, which is the order a camera has them in: the lens
-                // decides what is sharp, the shutter decides how far it smeared while open.
-                // The gun is not in this frame yet -- ScreenFx_ViewmodelFrame owns that half.
-                if (wantFb)  FrameBlend_Draw(dev, rt, desc, ScreenFx_DepthTexture(), view, false);
-                // distort last: ao/dof/blur above were computed on the undistorted depth
+                if (wantAo)   Ssao_Draw(dev, rt, desc, ScreenFx_DepthTexture(), view);
+                // botox: before dof so the blur lands on the distorted frame (dof's focus still
+                // reads the undistorted depth there too)
                 if (wantWarp) ScreenFxPasses_Warp(dev, rt, desc, ScreenFx_DepthTexture(), view);
+                if (wantDof)  Dof_Draw(dev, rt, desc, ScreenFx_DepthTexture(), view);
+                s_lateFrm = s_frame;   // fb waits for the web screen
             } else {
                 static bool logged = false;
                 if (!logged) {
@@ -1409,6 +1418,37 @@ void ScreenFx_Frame(IDirect3DDevice9* dev, bool fromPostSlot)
     }
 
     depthSurf->Release();
+    if (rt) rt->Release();
+}
+
+// ==== the late half: the shutter =====================================================
+// botox runs Web_OnPostScreenSpaceEffects between dof and true motion blur, so the web screen
+// is smeared but never occluded or focus-blurred. The post slot calls this after the web
+// screen (queued the same way as the early half); EndScene calls it right after ScreenFx_Frame.
+// Only for a frame whose early half drew, off the depth that half resolved. Bloom is NOT here:
+// it is the gun pass's tail (FxViewmodelPassDispatch), after the gun the way botox's post slot is.
+void ScreenFx_FrameLate(IDirect3DDevice9* dev)
+{
+    if (s_lateFrm != s_frame) return;
+    s_lateFrm = -1;                       // once a frame, whichever call site lands first
+    if (!dev || !g_fbEnable || g_eject || !ScreenFx_DepthTexture()) return;
+
+    IDirect3DSurface9* rt = nullptr;
+    IDirect3DSurface9* bb = nullptr;
+    bool onBB = false;
+    if (SUCCEEDED(dev->GetRenderTarget(0, &rt)) && rt &&
+        SUCCEEDED(dev->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &bb)) && bb)
+        onBB = (rt == bb);
+    D3DSURFACE_DESC desc{};
+    const bool described = bb && SUCCEEDED(bb->GetDesc(&desc));
+    if (bb) bb->Release();
+
+    FxViewSetup view{};
+    if (onBB && described && ScreenFx_View(view)) {
+        FxNoFetch4 noFetch4(dev);
+        // The gun is not in this frame yet -- ScreenFx_ViewmodelFrame owns that half.
+        FrameBlend_Draw(dev, rt, desc, ScreenFx_DepthTexture(), view, false);
+    }
     if (rt) rt->Release();
 }
 
@@ -1499,13 +1539,14 @@ static void FxViewmodelPassDispatch()
 
     if (GetCurrentThreadId() == present) {
         ScreenFx_ViewmodelFrame(g_d3dDev);
+        Bloom_Frame(g_d3dDev);   // latched: the grade's call sites skip it after this
     } else if (g_fxUseCallQueue) {
         const bool queued = FxQueueOnRenderThread(&s_fxFunctorVm);
         static bool logged = false;
         if (!logged) {
             logged = true;
             DebugLog("^FX: viewmodel pass %s from ViewDrawFade (thread %lu, render thread %lu)",
-                     queued ? "QUEUED onto the render thread" : "REFUSED by the call queue -- the gun stays sharp",
+                     queued ? "QUEUED onto the render thread" : "REFUSED by the call queue -- the gun stays sharp, bloom at the hud",
                      GetCurrentThreadId(), present);
         }
     }
@@ -1521,8 +1562,8 @@ static void __fastcall h_ViewDrawFade(void* thisptr, unsigned char* color, void*
         return;
 
     // Flip world (either DLL) mirrors before DrawViewModels, so the gun's colour and its 0..0.1 depth slice
-    // are both unmirrored here: the gun's blur mask lines up either way.
-    if (!g_eject && ((g_dofEnable && !g_dofViewmodelSharp) || (g_fbEnable && g_fbViewmodel)))
+    // are both unmirrored here: the gun's blur mask lines up either way. Bloom after it (botox order).
+    if (!g_eject && ((g_dofEnable && !g_dofViewmodelSharp) || (g_fbEnable && g_fbViewmodel) || g_bloomEnable))
         FxViewmodelPassDispatch();
 }
 
@@ -1790,8 +1831,6 @@ static bool __fastcall h_DoPostScreenSpaceEffects(void* thisptr, const void* set
 
     const bool ret = o_DoPostSSE(thisptr, setup);
 
-    if (!g_eject) Web_OnPostScreenSpaceEffects(setup);   // botox do_post_screen_space_effects.cpp:49
-
     /* THE GOOD PLACE TO DRAW, when we are allowed to. Here the 3D scene is finished and the
        HUD and the viewmodel are not drawn yet (viewrender.cpp:2157, DrawViewModels at 2160),
        so a blur leaves both of them sharp -- which the EndScene fallback cannot, since vgui
@@ -1801,11 +1840,13 @@ static bool __fastcall h_DoPostScreenSpaceEffects(void* thisptr, const void* set
        thread's calls and replays them later, so raw d3d issued here would execute in the
        middle of the PREVIOUS frame's playback. That case falls through to the EndScene
        fallback instead, and says so once. */
+    int route = 0;   // how the early half ran here: 1 inline, 2 queued -- the late half follows it
     if (!g_eject && (FxWantDepthPass() || g_fxDepthProbe)) {
         const DWORD present = Render_PresentTid();
 
         if (present && tid == present) {
             ScreenFx_Frame(g_d3dDev, true);
+            route = 1;
         } else if (present) {
             // MULTICORE. This slot is on the main thread and raw d3d issued here would land
             // in the middle of the previous frame's playback -- so hand the work to the
@@ -1821,6 +1862,7 @@ static bool __fastcall h_DoPostScreenSpaceEffects(void* thisptr, const void* set
                              s_cqQueued, (int)s_cqRan);
                 }
             }
+            if (queued) route = 2;
 
             static bool logged = false;
             if (!logged) {
@@ -1837,6 +1879,14 @@ static bool __fastcall h_DoPostScreenSpaceEffects(void* thisptr, const void* set
             }
         }
     }
+
+    // Web on surface: botox do_post_screen_space_effects.cpp:58 -- after dof, before true motion
+    // blur: smeared, never occluded or focus-blurred. Both queue onto the render thread in call order.
+    if (!g_eject) Web_OnPostScreenSpaceEffects(setup);
+
+    // the shutter: frame blend's world half, over the web screen (ScreenFx_FrameLate)
+    if (route == 1)      ScreenFx_FrameLate(g_d3dDev);
+    else if (route == 2) FxQueueOnRenderThread(&s_fxFunctorLate);
 
     // Flip world: the world is finished and DrawViewModels is next (viewrender.cpp:2160), so the gun
     // draws unmirrored over it. After the passes above so they still read a z buffer that matches the colour.

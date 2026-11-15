@@ -20,6 +20,7 @@ inline int   g_mpNextKey           = 0;       // m_media_player_next_key
 
 // points settings (m_points_*)
 inline bool  g_ptsBigFont          = false;   // m_points_big_font
+inline bool  g_ptsReadout          = false;   // m_points_readout
 inline float g_ptsAppearSpeed      = 1.f;     // m_points_appear_speed
 inline float g_ptsBobSpeed         = 1.f;     // m_points_speed
 inline float g_ptsOffsetX          = 0.f;     // m_points_x_offset

@@ -943,6 +943,12 @@ static const CfgEntry kEntries[] = {
     { "detectionStackEb",   CfgEntry::BOOL,   &g_detectionStackEb, 0 },
     { "detectionTypes",     CfgEntry::INT,    &g_detectionTypes, 0 },
     { "detectionLabel",     CfgEntry::STR,    g_detectionLabel, sizeof(g_detectionLabel) },
+    { "detectionSeparator", CfgEntry::STR,    g_detectionSeparator, sizeof(g_detectionSeparator) },
+    { "detectionSeparatorColor", CfgEntry::FLOAT4, g_detectionSeparatorColor, 0 },
+    { "detectionLabelColor",     CfgEntry::FLOAT4, g_detectionLabelColor, 0 },
+    { "detectionPrefixMode",     CfgEntry::INT,    &g_detectionPrefixMode, 0 },
+    { "detectionPrefixColor",    CfgEntry::FLOAT4, g_detectionPrefixColor, 0 },
+    { "detectionPrefix",         CfgEntry::STR,    g_detectionPrefix, sizeof(g_detectionPrefix) },
 
     // ---- unit B: pixelsurf lines ----
     { "psLinesEnable",     CfgEntry::BOOL,   &g_psLinesEnable, 0 },

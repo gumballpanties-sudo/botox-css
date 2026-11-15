@@ -4,6 +4,7 @@
 // sent cmd), never a feature's sim or plan -- a detection is a trick PERFORMED.
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
 
 struct DetStart { bool air = false, landedWalk = false; float vz = 0.f, speed = 0.f; int tick = 0; };
 
@@ -56,4 +57,20 @@ inline bool DetFresh(bool now, int& off)
     const bool f = now && off >= 8;
     off = now ? 0 : (off < 1 << 30 ? off + 1 : off);
     return f;
+}
+
+// botox push_notice pick_prefix, random mode: row index to print, -1 = none. Never the same text
+// as `last` while another non-empty row exists (empty rows skipped). r = any random number.
+// count <= rows in the array ( NameList: kMaxNames ).
+inline int DetPickPrefix(const char (*rows)[64], int count, const char* last, unsigned r)
+{
+    int pool[64], n = 0, any = -1;
+    count = count < 0 ? 0 : (count > 64 ? 64 : count);
+    for (int i = 0; i < count; ++i)
+    {
+        if (!rows[i][0]) continue;
+        any = i;
+        if (std::strcmp(rows[i], last) != 0) pool[n++] = i;
+    }
+    return n ? pool[r % (unsigned)n] : any;
 }

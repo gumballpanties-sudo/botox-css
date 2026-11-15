@@ -8,6 +8,13 @@ inline bool g_detections       = false;
 inline int  g_detectionTypes   = 0;        // bit i = DetType i
 inline bool g_detectionStackEb = false;
 inline char g_detectionLabel[64] = "botox";
+// line = label, separator, prefix + ' ', trick ( "edgebugged" ), each its own color
+inline char  g_detectionSeparator[32]     = " | ";   // empty = " | "
+inline float g_detectionSeparatorColor[4] = { 190.f / 255.f, 190.f / 255.f, 190.f / 255.f, 1.f };
+inline float g_detectionLabelColor[4]     = { 190.f / 255.f, 190.f / 255.f, 190.f / 255.f, 1.f };
+inline int   g_detectionPrefixMode        = 0;       // 0 off, 1 static g_detectionPrefix, 2 random g_detectionPrefixList ( names.h )
+inline float g_detectionPrefixColor[4]    = { 1.f, 1.f, 1.f, 1.f };
+inline char  g_detectionPrefix[64]        = "";
 
 // cmd start state + this cmd's trick flags. Movement thread (CreateMove), so chat is safe here.
 struct DetTick

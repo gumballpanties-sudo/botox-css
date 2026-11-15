@@ -2338,6 +2338,7 @@ HRESULT __stdcall h_EndScene(IDirect3DDevice9* dev)
     // reason a camera focuses before the film is developed. This is the render thread, so
     // it is also the only place raw d3d is in step with the material system's playback.
     ScreenFx_Frame(dev);
+    ScreenFx_FrameLate(dev);   // fb half (botox order: after dof); no-op unless the line above drew
 
     // Colour correction fallback. With multicore rendering the vgui paint runs on the main
     // thread and stands down, so the grade has to land here instead -- still inside the

@@ -8,6 +8,7 @@
 
 GetPlayerName_t o_GetPlayerName = nullptr;
 NameList g_nameList, g_teamLabelList, g_enemyLabelList, g_everyoneLabelList;
+NameList g_detectionPrefixList;
 
 namespace
 {
@@ -535,6 +536,7 @@ namespace
         { "teamLabelCycle",     &g_teamLabelList },
         { "enemyLabelCycle",    &g_enemyLabelList },
         { "everyoneLabelCycle", &g_everyoneLabelList },
+        { "detPrefixCycle",     &g_detectionPrefixList },   // not "detectionPrefix": prefix match would eat detectionPrefixMode
     };
 }
 

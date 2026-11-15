@@ -3,28 +3,25 @@
 // Rebuild after ANY edit here:
 //   fxc /T ps_3_0 /E main /Fh src/hacks/screen/shaders/fx_dof_coc.h /Vn k_fxDofCocBytes src/hacks/screen/shaders/fx_dof_coc.hlsl
 //
-// CinematicDOF's PS_CoCGaussian1/2, and it is the one thing a plain gather never has: a
-// field that says "a blurred foreground reaches THIS far out", including over pixels that
-// are perfectly sharp themselves. Without it the near plane can only paint inside its own
-// silhouette and that silhouette stays a razor line however hard the interior is blurred.
+// CinematicDOF's PS_CoCGaussian1/2, two channels:
+//   r = the near coc, blurred (his field: alpha tail, smoothing)
+//   g = the near MASK, blurred. g is 0.5 on any silhouette whatever the coc, and r / g is the
+//       coc of the foreground around this pixel, thin or wide -- the near pass's halo radius.
 //
-// THE FIELD IS A MAX, NOT AN AVERAGE, and that is the difference between a soft edge and a
-// slightly less hard one. Blurring the coc itself halves it at the silhouette and it is gone
-// a few pixels out. This instead asks "what is the biggest coc whose own radius still
-// REACHES me": every tap is worth its coc minus the distance it travelled, in units of the
-// max blur. Inside the foreground that is a plateau at its own coc, and outside it decays
-// linearly to nothing exactly where its disc ends. A max is separable the way an average is,
-// so it is still two half-res draws.
+// The first pass MUST be point sampled (dof.cpp): a bilinear fetch blends a coc across the
+// silhouette and saturate(own * blur) turns that half texel into a full mask, so r / g lies.
+// Its target is full height for the same reason: at half height a point fetch skips a row.
+//
+// Each tap is two fetches a quarter step either side: at 20 px max blur the taps are 6.6 px
+// apart, and one fetch per tap turned the field into a staircase that banded the halo.
 //
 //   c1 = half the sharp band, max blur radius in pixels, 1/width, 1/height
-//   c4 = direction x, direction y, reading the prepared alpha, -
+//   c4 = direction x, direction y, 1 = first pass (reads the prepared alpha), -
 
 sampler2D sSrc : register(s0);
 float4 c1 : register(c1);
 float4 c4 : register(c4);
 
-// CinematicDOF's own 18-tap table (Ioxa's gaussian). The offsets are half a texel short of
-// whole ones so every tap sits between two and reaches twice as far for free.
 static const float k_off[18] = {
     0.0, 1.4953705027, 3.4891992113, 5.4830312105, 7.4768683759, 9.4707125766, 11.4645656736,
     13.4584295168, 15.4523059431, 17.4461967743, 19.4661974725, 21.4627427973, 23.4592916956,
@@ -36,29 +33,32 @@ static const float k_wgt[18] = {
     0.0097960001, 0.0069746748, 0.0048301008, 0.0032534598, 0.0021315311, 0.0013582974
 };
 
-float read(float2 t)
+// first pass: (saturate(1 - 2a), saturate((1 - 2a) * blur)) off the signed alpha; second: rg
+float2 read(float2 t, float2 ka, float2 kb, float2 k0)
 {
-    // the prepared alpha is the SIGNED coc, 0.5 sharp -- the near side is its negative half
     float4 s = tex2Dlod(sSrc, float4(t, 0, 0));
-    return (c4.z > 0.5) ? max(-(s.a * 2.0 - 1.0), 0.0) : s.r;
+    return saturate(s.a * ka + (s.rg * k0 + kb));
 }
 
 float4 main(float2 uv : TEXCOORD0) : COLOR0
 {
-    // THE FIELD IS FIVE TIMES WIDER THAN THE DISC, and that is the whole transition.
-    // CinematicDOF blurs its near coc over 33.4 texels x NearPlaneMaxBlur x 0.8 -- about
-    // 50 px -- while its near disc is only about 9: the alpha ramp is what you see fading,
-    // not the gather. A field capped at the disc radius gives an 8 px blur an 8 px
-    // transition, and that reads as a cut.
-    float2 axis = c4.xy * c1.zw * max(c1.y, 1.0) * 0.1645;
+    float2 k1 = c4.z * float2(1.0, c1.y);
+    float2 ka = -2.0 * k1;
+    float2 k0 = 1.0 - c4.z;
 
-    float coc = read(uv) * k_wgt[0];
+    // the field is about five times wider than the disc: that tail is CinematicDOF's fade
+    float2 axis = c4.xy * c1.zw * max(c1.y, 1.0) * 0.1645;
+    float2 hs   = axis * 0.5;
+
+    float2 f = read(uv, ka, k1, k0) * k_wgt[0];
 
     [unroll] for (int i = 1; i < 18; i++)
     {
-        float2 o = axis * k_off[i];
-        coc += (read(uv + o) + read(uv - o)) * k_wgt[i];
+        float2 p = uv + axis * k_off[i];
+        float2 q = uv - axis * k_off[i];
+        f += (read(p - hs, ka, k1, k0) + read(p + hs, ka, k1, k0) +
+              read(q - hs, ka, k1, k0) + read(q + hs, ka, k1, k0)) * (0.5 * k_wgt[i]);
     }
 
-    return float4(saturate(coc), 0.0, 0.0, 1.0);
+    return float4(saturate(f), 0.0, 1.0);
 }

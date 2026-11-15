@@ -13,6 +13,7 @@
     { "mpToggleKey",        CfgEntry::INT,    &g_mpToggleKey, 0 },
     { "mpNextKey",          CfgEntry::INT,    &g_mpNextKey, 0 },
     { "ptsBigFont",         CfgEntry::BOOL,   &g_ptsBigFont, 0 },
+    { "ptsReadout",         CfgEntry::BOOL,   &g_ptsReadout, 0 },
     { "ptsAppearSpeed",     CfgEntry::FLOAT,  &g_ptsAppearSpeed, 0 },
     { "ptsBobSpeed",        CfgEntry::FLOAT,  &g_ptsBobSpeed, 0 },
     { "ptsOffsetX",         CfgEntry::FLOAT,  &g_ptsOffsetX, 0 },

@@ -2,6 +2,7 @@
 #include "menu.h"        // MenuBindKey
 #include "../hud/indicators.h"
 #include "../movement/detections.h"
+#include "../misc/names.h"   // Names_EntryList, g_detectionPrefixList
 #include "../movement/ps_lines.h"
 #include "../movement/movement.h"   // PS_ClearTrajectory
 #include "../movement/recorder.h"
@@ -315,6 +316,21 @@ void UnitB_Menu_movement_detections()
             ImGui::MultiCombo("detections", &g_detectionTypes, kTypes, DET_MAX);
             ImGui::Checkbox("stack edgebugs##detstack", &g_detectionStackEb);
             ImGui::InputText("chat label##detlabel", g_detectionLabel, sizeof(g_detectionLabel));
+
+            constexpr ImGuiColorEditFlags kNoAlpha = ImGuiColorEditFlags_NoOptions | ImGuiColorEditFlags_InputRGB |
+                ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoDragDrop |
+                ImGuiColorEditFlags_PickerHueBar | ImGuiColorEditFlags_NoBorder;
+            ImGui::InputTextWithHint("separator##detsep", " | ", g_detectionSeparator, sizeof(g_detectionSeparator));
+            ImGui::ColorRow("separator color##detsepcol", g_detectionSeparatorColor, kNoAlpha);
+            ImGui::ColorRow("trick label color##detlabelcol", g_detectionLabelColor, kNoAlpha);
+
+            ImGui::Combo("prefix##detprefixmode", &g_detectionPrefixMode, "off\0static\0random\0");
+            if (g_detectionPrefixMode != 0)
+                ImGui::ColorRow("prefix color##detprefixcol", g_detectionPrefixColor, kNoAlpha);
+            if (g_detectionPrefixMode == 1)
+                ImGui::InputTextWithHint("prefix text##detprefix", "nice", g_detectionPrefix, sizeof(g_detectionPrefix));
+            else if (g_detectionPrefixMode == 2)
+                Names_EntryList("##detprefixes", g_detectionPrefixList, "+ add prefix");
         }, ImVec2(220.f, -1));
 
     // botox :1398-1422

@@ -5,6 +5,8 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <iterator>
+#include <mutex>
 #include <string>
 #include <utility>
 
@@ -15,6 +17,26 @@ namespace
     // written by Points_OnTrick (CreateMove), read + zeroed by RenderPoints (render thread)
     std::atomic<int>      s_total{ 0 };
     std::atomic<unsigned> s_events{ 0 };
+
+    // botox readout: one row per trick this combo. rows + s_total change together under the lock
+    constexpr const char* kRowNames[] = { "edgebug", "fireman", "jumpbug", "headbounce", "pixelsurf", "texturebug", "airstuck", "wallclimb" };
+    static_assert(std::size(kRowNames) == PTS_PIXEL_SURF_RIDE, "readout name per trick");
+
+    struct ReadoutRow
+    {
+        int count = 0;
+        int amount = 0;
+        unsigned order = 0;
+    };
+    std::mutex s_readoutLock;
+    ReadoutRow s_rows[PTS_PIXEL_SURF_RIDE];
+    unsigned s_rowOrder = 0;
+
+    void ReadoutClear()
+    {
+        for (auto& row : s_rows) row = {};
+        s_rowOrder = 0;
+    }
 
     float Now()
     {
@@ -91,6 +113,12 @@ void Points_OnTrick(int trick)
     else
         amount = trick == PTS_EDGE_BUG ? 125 : trick == PTS_FIREMAN ? 275 : 50;
 
+    std::lock_guard<std::mutex> lock(s_readoutLock);
+    ReadoutRow& row = s_rows[trick >= kRideFirst ? trick - kRideFirst + kHeldFirst : trick];
+    if (!row.order) row.order = ++s_rowOrder;
+    if (trick < kRideFirst) ++row.count;
+    row.amount += amount;
+
     s_total.fetch_add(amount, std::memory_order_relaxed);
     s_events.fetch_add(1u, std::memory_order_release);
 }
@@ -107,17 +135,21 @@ void RenderPoints()
     static float displayTimer = 0.f, fadeTimer = 0.f, animTimer = 0.f, revealTimer = 0.f, resetTimer = 0.f;
     static bool fading = false, animActive = false, revealing = false;
     static float offset = 0.f, offsetVel = 0.f, bobPhase = 0.f, drop = 0.f, trail = 0.f;
+    static float rowAnim[PTS_PIXEL_SURF_RIDE] = {};
 
     const auto reset = [&] {
         shown = 0;
         displayTimer = fadeTimer = animTimer = revealTimer = resetTimer = 0.f;
         fading = animActive = revealing = false;
         offset = offsetVel = bobPhase = drop = trail = 0.f;
+        std::fill(std::begin(rowAnim), std::end(rowAnim), 0.f);
     };
 
     if (!g_ptsEnable)
     {
+        std::lock_guard<std::mutex> lock(s_readoutLock);
         s_total.store(0, std::memory_order_relaxed);
+        ReadoutClear();
         reset();
         return;
     }
@@ -197,8 +229,9 @@ void RenderPoints()
     {
         if ((resetTimer += dt) >= 0.2f)
         {
+            std::lock_guard<std::mutex> lock(s_readoutLock);
             int expected = total;
-            s_total.compare_exchange_strong(expected, 0, std::memory_order_relaxed);
+            if (s_total.compare_exchange_strong(expected, 0, std::memory_order_relaxed)) ReadoutClear();
             reset();
         }
         return;
@@ -220,7 +253,9 @@ void RenderPoints()
     float x = screen ? io.DisplaySize.x - 8.f - size.x : rightOf ? box.z + kGap : box.x - kGap - size.x;
     float y = (hasBox && !screen ? (box.y + box.w) * 0.5f : 20.f) - size.y * 0.5f;
 
-    x += (rightOf ? -offset : offset) + g_ptsOffsetX;
+    const float shiftX = (rightOf ? -offset : offset) + g_ptsOffsetX;
+    const float textBottom = y + size.y + g_ptsOffsetY;
+    x += shiftX;
     y += drop + bob + g_ptsOffsetY;
     x = std::floor(x);
     y = std::floor(y);
@@ -239,4 +274,68 @@ void RenderPoints()
     dl->AddText(font, fontSize, ImVec2(x + 1.f, y + 1.f + trail), accentA(180.f), t);
     dl->AddText(font, fontSize, ImVec2(x + 0.5f, y + 0.5f + trail * 0.55f), accentA(180.f), t);
     dl->AddText(font, fontSize, ImVec2(x, y), IM_COL32(255, 255, 255, (int)std::clamp(alpha * 255.f, 0.f, 255.f)), t);
+
+    if (!g_ptsReadout) return;
+
+    ReadoutRow rows[PTS_PIXEL_SURF_RIDE];
+    {
+        std::lock_guard<std::mutex> lock(s_readoutLock);
+        std::copy(std::begin(s_rows), std::end(s_rows), rows);
+    }
+
+    int order[PTS_PIXEL_SURF_RIDE], count = 0;
+    for (int i = 0; i < PTS_PIXEL_SURF_RIDE; ++i)
+    {
+        if (rows[i].order) order[count++] = i;
+        else rowAnim[i] = 0.f;
+    }
+    std::sort(order, order + count, [&](int a, int b) { return rows[a].order < rows[b].order; });
+
+    // under the watermark, right edge = watermark right (pts left of it) else the pts text
+    const ImVec4 gif     = g_wmGifBox;
+    const bool hasGif    = gif.z > gif.x;
+    const bool underBox  = hasBox && !screen;
+    const float right    = underBox && !rightOf ? (hasGif ? std::max(box.z, gif.z) : box.z) + shiftX : x + size.x;
+    float rowY = textBottom;
+    if (underBox) rowY = std::max(rowY, (hasGif ? std::max(box.w, gif.w) : box.w) + g_ptsOffsetY);
+    rowY += 3.f;
+
+    const float groupAlpha = fading || revealing ? alpha : 1.f;
+    const float rowSize    = g_ptsBigFont ? fontSize * 0.72f : fontSize;
+    const float multSize   = rowSize * 0.8f;
+    const float space      = std::floor(rowSize * 0.3f);
+
+    const auto put = [&](const char* str, float px, float py, float sz, ImU32 col, ImU32 shadow) {
+        dl->AddText(font, sz, ImVec2(px + 1.f, py + 1.f), shadow, str);
+        dl->AddText(font, sz, ImVec2(px, py), col, str);
+    };
+
+    for (int n = 0; n < count; ++n)
+    {
+        const int i = order[n];
+        rowAnim[i] = std::min(rowAnim[i] + dt * speed / kReveal, 1.f);
+        const float ta = easeOut(rowAnim[i]);
+        const float a  = groupAlpha * ta;
+        const auto tint = [&](int r, int g, int b, float v) { return IM_COL32(r, g, b, (int)std::clamp(a * v, 0.f, 255.f)); };
+
+        const std::string mult = rows[i].count > 0 ? "x" + std::to_string(rows[i].count) : std::string();
+        const std::string gain = "+" + std::to_string(rows[i].amount);
+        const ImVec2 nameSize  = font->CalcTextSizeA(rowSize, FLT_MAX, 0.f, kRowNames[i]);
+        const float multW      = mult.empty() ? 0.f : font->CalcTextSizeA(multSize, FLT_MAX, 0.f, mult.c_str()).x + space;
+        const float gainW      = font->CalcTextSizeA(rowSize, FLT_MAX, 0.f, gain.c_str()).x;
+
+        float rx = std::floor(right - (nameSize.x + space + multW + gainW) + (1.f - ta) * 12.f);
+        const float ry = std::floor(rowY);
+
+        put(kRowNames[i], rx, ry, rowSize, tint(255, 255, 255, 255.f), tint(ar, ag, ab, 150.f));
+        rx += nameSize.x + space;
+        if (!mult.empty())
+        {
+            put(mult.c_str(), rx, std::floor(ry + (rowSize - multSize) * 0.75f), multSize, tint(255, 255, 255, 200.f), tint(ar, ag, ab, 110.f));
+            rx += multW;
+        }
+        put(gain.c_str(), rx, ry, rowSize, tint(ar, ag, ab, 255.f), tint(0, 0, 0, 150.f));
+
+        rowY += nameSize.y + 1.f;
+    }
 }

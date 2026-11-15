@@ -369,6 +369,7 @@ static void Page_MiscMain()
         if (g_ptsEnable)
             ImGui::OptionPopup("points settings", []() {
                 ImGui::Checkbox("big font##points", &g_ptsBigFont);
+                ImGui::Checkbox("readout##points", &g_ptsReadout);
                 ImGui::SliderFloat("appear speed##points", &g_ptsAppearSpeed, 0.5f, 20.f, "%.2fx");
                 ImGui::SliderFloat("bob speed##points", &g_ptsBobSpeed, 0.1f, 10.f, "%.2fx");
                 ImGui::SliderFloat("x offset##points", &g_ptsOffsetX, -300.f, 300.f, "%.0f px");

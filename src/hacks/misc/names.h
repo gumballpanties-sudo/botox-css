@@ -24,6 +24,7 @@ struct NameList
     n_names::Cycle cycle;
 };
 extern NameList g_nameList, g_teamLabelList, g_enemyLabelList, g_everyoneLabelList;
+extern NameList g_detectionPrefixList;   // detections random prefix rows ( cycle unused ), saved with these lists
 
 using GetPlayerName_t = const char*(__fastcall*)(void*, int);
 extern GetPlayerName_t o_GetPlayerName;

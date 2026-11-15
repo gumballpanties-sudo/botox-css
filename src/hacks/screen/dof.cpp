@@ -145,7 +145,8 @@ static bool DofBuild(IDirect3DDevice9* dev, const D3DSURFACE_DESC& desc)
     {
         if (SUCCEEDED(dev->CreateTexture(cocW, cocH, 1, D3DUSAGE_RENDERTARGET, fmt, D3DPOOL_DEFAULT, &s_cocTex, nullptr)) &&
             SUCCEEDED(s_cocTex->GetSurfaceLevel(0, &s_cocSurf)) &&
-            SUCCEEDED(dev->CreateTexture(cocW, cocH, 1, D3DUSAGE_RENDERTARGET, fmt, D3DPOOL_DEFAULT, &s_cocTmpTex, nullptr)) &&
+            // tmp full height: the point sampled H pass at half height would skip every other row
+            SUCCEEDED(dev->CreateTexture(cocW, desc.Height, 1, D3DUSAGE_RENDERTARGET, fmt, D3DPOOL_DEFAULT, &s_cocTmpTex, nullptr)) &&
             SUCCEEDED(s_cocTmpTex->GetSurfaceLevel(0, &s_cocTmpSurf)))
             break;
 
@@ -521,14 +522,20 @@ void Dof_Draw(IDirect3DDevice9* dev, IDirect3DSurface9* target,
         const float cocH[4] = { 1.f, 0.f, 1.f, 0.f };   // z marks the pass that unpacks the prepared alpha
         const float cocV[4] = { 0.f, 1.f, 0.f, 0.f };
 
+        // point, or the near mask lies on every bilinear-blended silhouette texel (fx_dof_coc.hlsl)
+        dev->SetSamplerState(0, D3DSAMP_MINFILTER, D3DTEXF_POINT);
+        dev->SetSamplerState(0, D3DSAMP_MAGFILTER, D3DTEXF_POINT);
+        const D3DVIEWPORT9 cocTmpVp{ 0, 0, (DWORD)s_cocW, (DWORD)s_h, 0.f, 1.f };
         dev->SetPixelShader(cocShader);
         dev->SetRenderState(D3DRS_COLORWRITEENABLE, 0x0f);
-        dev->SetViewport(&cocVp);
         dev->SetRenderTarget(0, s_cocTmpSurf);
+        dev->SetViewport(&cocTmpVp);
         dev->SetTexture(0, s_colTex);
         dev->SetPixelShaderConstantF(4, cocH, 1);
-        ScreenFx_DrawQuad(dev, s_cocW, s_cocH);
+        ScreenFx_DrawQuad(dev, s_cocW, s_h);
 
+        dev->SetSamplerState(0, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
+        dev->SetSamplerState(0, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
         dev->SetRenderTarget(0, s_cocSurf);
         dev->SetViewport(&cocVp);
         dev->SetTexture(0, s_cocTmpTex);

@@ -5,7 +5,11 @@
 #include "../hud/points.h"            // botox points_on_trick
 #include "fireman_pure.h"             // IsFlung: the CSS catch tick (grab + 270 fling, one tick)
 #include "../misc/misc_overlays.h"    // botox on_healthshot
+#include "../misc/names.h"            // g_detectionPrefixList
+#include "../misc/game_pure.h"        // NoPercent: ChatPrintf formats the line
 #include <cstdio>
+#include <random>
+#include <string>
 
 // g_detectionLabel with '%' stripped (ChatPrintf formats), "botox" when empty
 static const char* Label(char (&label)[64])
@@ -16,17 +20,43 @@ static const char* Label(char (&label)[64])
     return n ? label : "botox";
 }
 
-// botox push_notice detection_html: accent label, " | event" in #bebebe
+static std::string Hex(const float* c)
+{
+    const auto b8 = [](float v) { return (int)((v < 0.f ? 0.f : v > 1.f ? 1.f : v) * 255.f + 0.5f); };   // hand-edited cfg > 1 = 3 digits
+    char b[8];
+    snprintf(b, sizeof(b), "%02X%02X%02X", b8(c[0]), b8(c[1]), b8(c[2]));
+    return b;
+}
+
+// botox push_notice pick_prefix: static text, or random rows never twice in a row
+static std::string PickPrefix()
+{
+    static char last[64] = {};
+    static std::minstd_rand rng(std::random_device{}());
+    if (g_detectionPrefixMode == 1) return g_detectionPrefix;
+    if (g_detectionPrefixMode != 2) return {};
+    const int i = DetPickPrefix(g_detectionPrefixList.text, g_detectionPrefixList.count, last, (unsigned)rng());
+    if (i < 0) last[0] = 0;
+    else       strncpy_s(last, g_detectionPrefixList.text[i], _TRUNCATE);
+    return last;
+}
+
+// botox push_notice detection_html: accent label, separator, prefix, trick, each its own color
+static void Line(const char* event, const std::string& prefix)
+{
+    char label[64];
+    const std::string pre = prefix.empty() ? std::string() : "\x07" + Hex(g_detectionPrefixColor) + n_game::NoPercent(prefix) + " ";
+    const std::string line = "\x07" + Hex(g_accentColor) + Label(label) +
+                             "\x07" + Hex(g_detectionSeparatorColor) + n_game::NoPercent(g_detectionSeparator[0] ? g_detectionSeparator : " | ") +
+                             pre + "\x07" + Hex(g_detectionLabelColor) + event;
+    Aim_ChatPrint(line.c_str());
+    DebugLog("DET: %s", event);
+}
+
 static void Print(DetType type, const char* event)
 {
     if (!g_detections || !(g_detectionTypes & (1 << type))) return;
-    char label[64];
-    char line[160];
-    snprintf(line, sizeof(line), "\x07%02X%02X%02X%s\x07" "BEBEBE | %s",
-             (int)(g_accentColor[0] * 255), (int)(g_accentColor[1] * 255), (int)(g_accentColor[2] * 255),
-             Label(label), event);
-    Aim_ChatPrint(line);
-    DebugLog("DET: %s", event);
+    Line(event, PickPrefix());
 }
 
 // botox jump_stats line: value color by tier, labels grey; "%%" = a literal '%' after ChatPrintf
@@ -48,12 +78,16 @@ void Detections_Jumpstats(const JsResult& r)
              r.name, r.distance, r.strafes, r.pre, r.max, r.height, r.sync, r.tier);
 }
 
-static void PrintEb(int chain)
+// keep = chain x2+ printed live: same prefix as x1. Own slot, a pixelsurf mid chain cannot swap it
+static void PrintEb(int chain, bool keep)
 {
+    static std::string prefix;
+    if (!g_detections || !(g_detectionTypes & (1 << DET_EB))) return;
+    if (!keep || g_detectionPrefixMode != 2) prefix = PickPrefix();
     char ev[32];
     if (chain > 1) snprintf(ev, sizeof(ev), "edgebugged x%d", chain);
     else           snprintf(ev, sizeof(ev), "edgebugged");
-    Print(DET_EB, ev);
+    Line(ev, prefix);
 }
 
 void Detections_Tick(const DetTick& t)
@@ -68,7 +102,7 @@ void Detections_Tick(const DetTick& t)
     groundTicks = t.onGround ? groundTicks + 1 : 0;
     if (chain && (groundTicks >= 2 || (t.onGround && t.jumpPressed)))
     {
-        if (g_detectionStackEb) PrintEb(chain);
+        if (g_detectionStackEb) PrintEb(chain, false);
         chain = 0;
     }
 
@@ -83,7 +117,7 @@ void Detections_Tick(const DetTick& t)
     if (DetEbStep(eb, st, g, t.tb || t.tbOwns, t.ps))
     {
         ++chain;
-        if (!g_detectionStackEb) PrintEb(chain);
+        if (!g_detectionStackEb) PrintEb(chain, chain > 1);
         Healthshot_Trigger(1);                 // unit misc: botox on_healthshot( 1 ) + points_on_trick
         Points_OnTrick(PTS_EDGE_BUG);
     }

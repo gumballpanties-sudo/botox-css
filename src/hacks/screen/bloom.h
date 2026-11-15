@@ -3,9 +3,10 @@
 
 // Bloom -- the bright part of the frame bled into a glow (hacks/screen/bloom.cpp).
 //
-// Runs at the same call sites as the colour grade and just before it: the glow is a lens,
-// the grade is the film. That is inside the game's own render, so every capture path
-// records it -- and the hud is already in the backbuffer there, so it glows too.
+// botox order: after true motion blur, before the hud (do_post_screen_space_effects.cpp, which
+// runs after DrawViewModels in csgo). CSS twin = the tail of the gun pass from ViewDrawFade
+// (screenfx.cpp FxViewmodelPassDispatch): gun in, hud out. The grade's call sites below are
+// the fallback for a frame that pass missed (call queue refused): there the hud glows too.
 //
 // Bloom_Frame is idempotent per frame: the first caller whose render target is the
 // backbuffer draws and latches; Bloom_NewFrame clears the latch at the end of the frame.
