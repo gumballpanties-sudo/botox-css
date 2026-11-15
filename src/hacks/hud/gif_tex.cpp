@@ -210,6 +210,31 @@ GifTex* GifTex_GetFile(const char* setting)
     return lastGif = GifTex_Get(path.c_str(), bytes.data(), bytes.size());
 }
 
+int GifTex_FrameCount(GifTex* gif)
+{
+    return gif && !gif->failed && gif->bitmap ? (int)gif->delaysMs.size() : 0;
+}
+
+void GifTex_Reload(const char* setting)
+{
+    if (!setting || !*setting) return;
+    const std::string path = UrlPath(setting);
+    const auto it = s_cache.find(path);
+    if (path.empty() || it == s_cache.end()) return;
+
+    GifTex& g = it->second;
+    if (g.texture) { g.texture->Release(); g.texture = nullptr; }
+    delete g.bitmap; g.bitmap = nullptr;   // before its stream
+    if (g.stream) { g.stream->Release(); g.stream = nullptr; }
+    g.delaysMs.clear();
+    g.uploaded = (size_t)-1;
+
+    std::ifstream file(path, std::ios::binary);
+    const std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    if (!DecodeHeader(g, bytes.data(), bytes.size()))
+        DebugLog("gif_tex: reload '%s' failed to decode", path.c_str());
+}
+
 // ==== browse button (botox image_path_input pick_thread, no upload) ====
 static std::mutex  s_pickMutex;
 static std::string s_pickResult;

@@ -440,7 +440,7 @@ static int s_settingsSub = 0;
 
 static const SidebarTab kSidebar[TAB_COUNT] = {
     { kTabNames[TAB_AIMBOT],    nullptr,     0 },
-    { kTabNames[TAB_VISUALS],   kVisualsSub, 3 },
+    { kTabNames[TAB_VISUALS],   kVisualsSub, 4 },
     { kTabNames[TAB_MOVEMENT],  kMoveSub,    5 },
     { kTabNames[TAB_MISC],      kMiscSub,    3 },
     { kTabNames[TAB_FONTS],     kFontsSub,   3 },

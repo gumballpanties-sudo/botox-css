@@ -76,7 +76,7 @@ inline void SoundFileCombo(const char* label, char* buf, size_t sz)
 }
 
 // tab roots + their page state (sidebar flyout in menu.cpp)
-extern const char* kVisualsSub[3]; extern int s_visualsSub; void Tab_VisualsRoot();
+extern const char* kVisualsSub[4]; extern int s_visualsSub; void Tab_VisualsRoot();
 extern const char* kMoveSub[5];    extern int s_moveSub;    void Tab_MovementRoot();
 extern const char* kMiscSub[3];    extern int s_miscSub;    void Tab_MiscRoot();
 extern const char* kFontsSub[3];   extern int s_fontsSub;   void Tab_Fonts();

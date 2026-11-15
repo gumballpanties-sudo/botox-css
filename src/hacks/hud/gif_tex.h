@@ -23,6 +23,11 @@ void GifTex_ReleaseAll();   // device Reset: the DEFAULT-pool frame texture is g
 
 // pixel size of the decoded GIF (frame 0 = every frame). false until it decoded.
 bool GifTex_Size(GifTex* gif, float& w, float& h);
+int  GifTex_FrameCount(GifTex* gif);   // 0 until it decoded
+
+// botox screen images "reload": re-read the file behind this setting in place (the cache entry,
+// and every GifTex* to it, stays valid). Nothing cached yet = no-op.
+void GifTex_Reload(const char* setting);
 
 // botox spectator_list.cpp file_image_frame / url_image_path: a local path as is, an http(s) link
 // (imgur page / .gifv / extensionless -> i.imgur.com raw file) downloaded once off the render

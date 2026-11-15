@@ -49,3 +49,7 @@ inline float g_sfxReflFalloff       = 0.f;
 inline float g_sfxReflScale         = 1.f;
 inline int   g_sfxReflQuality       = 2;
 inline bool  g_sfxReflSmoothNormals = true;
+
+// images (botox m_screen_images): visuals > images tab, any count. The list itself = watermark.cpp
+// ScreenImages(), one "screenImage=" cfg line per image (ScreenImages_SaveCfg / _LoadCfg)
+inline bool g_sfxImagesEnable = false;

@@ -1,4 +1,7 @@
 #include "menu_internal.h"
+#include "../hud/gif_tex.h"   // GifTex_PathInput / GifTex_GetFile (images)
+#include "../hud/watermark.h"   // ScreenImages (images page)
+#include <string>
 
 static void CcCurveEditor()
 {
@@ -461,6 +464,102 @@ static void Page_VisualsWorld()
             }, ImVec2(200.f, -1));
     }
     menu_group_end();
+    menu_columns_end();
+}
+
+// botox menu_tab_visuals.cpp case 3 (visuals > images): fpsoverlay image overlay, any count. List
+// left, the picked image's knobs right. Drawn by watermark.cpp RenderScreenImages.
+static void Page_VisualsImages()
+{
+    menu_columns_begin();
+
+    static int selected = 0;
+    auto& images = ScreenImages();
+    const bool on = g_sfxImagesEnable;
+
+    if (menu_group_begin("images"))
+    {
+        ImGui::Checkbox("images", &g_sfxImagesEnable);
+        if (on)
+        {
+            for (int i = 0; i < (int)images.size(); ++i)
+            {
+                const std::string& path = images[i].path;
+                const size_t slash = path.find_last_of("\\/");
+                const std::string name = path.empty() ? "empty" : path.substr(slash == std::string::npos ? 0 : slash + 1);
+                if (ImGui::Selectable((std::to_string(i + 1) + ". " + name + "##screen image " + std::to_string(i)).c_str(), selected == i))
+                    selected = i;
+            }
+
+            if (ImGui::Button("add image##screen images", ImVec2(-1.f, 15.f)))
+            {
+                images.emplace_back();
+                selected = (int)images.size() - 1;
+            }
+            if (!images.empty() && ImGui::Button("remove image##screen images", ImVec2(-1.f, 15.f)))
+                images.erase(images.begin() + std::clamp(selected, 0, (int)images.size() - 1));
+        }
+    }
+    menu_group_end();
+
+    menu_columns_next();
+
+    selected = std::clamp(selected, 0, std::max((int)images.size() - 1, 0));
+    if (on && !images.empty())
+    {
+        if (menu_group_begin("image settings"))
+        {
+            n_screen_image::image_t& img = images[selected];
+
+            // the box edits a copy; re-read when the pick changed or a config load / "clear" changed the path
+            static char s_pathBox[260] = "";
+            static std::string s_pathSeen;
+            static int s_pathFor = -1;
+            if (s_pathFor != selected || img.path != s_pathSeen)
+                strncpy_s(s_pathBox, img.path.c_str(), _TRUNCATE);
+
+            ImGui::Checkbox("show image##screen image", &img.show);
+            GifTex_PathInput("file path##screen image", "C:\\image.png or imgur link", s_pathBox, sizeof(s_pathBox));
+            img.path = s_pathSeen = s_pathBox;
+            s_pathFor = selected;
+
+            float gw = 0.f, gh = 0.f;
+            GifTex* gif = GifTex_GetFile(img.path.c_str());
+            if (GifTex_Size(gif, gw, gh))
+            {
+                const int frames = GifTex_FrameCount(gif);
+                ImGui::Label("%dx%d, %d frame%s", (int)gw, (int)gh, frames, frames == 1 ? "" : "s");
+            }
+            else if (!img.path.empty())
+                ImGui::Label("not loaded");
+
+            if (!img.path.empty())
+            {
+                if (ImGui::Button("reload##screen image", ImVec2(-1.f, 15.f))) GifTex_Reload(img.path.c_str());
+                if (ImGui::Button("clear##screen image", ImVec2(-1.f, 15.f))) img.path.clear();
+            }
+
+            ImGui::SliderFloat("scale##screen image", &img.scale, 0.05f, 5.f, "%.2fx");
+            ImGui::SliderFloat("rotation##screen image", &img.rotation, -180.f, 180.f, "%.0f deg");
+            ImGui::SliderFloat("opacity##screen image", &img.alpha, 0.f, 100.f, "%.0f%%");
+            ImGui::Checkbox("pixel art##screen image", &img.pixel_art);
+
+            // both modes: drag the image on screen while the menu is open, sliders follow
+            ImGui::Combo("position##screen image", &img.anchor, "free\0next to watermark\0");
+            if (img.anchor == 1)
+            {
+                ImGui::SliderFloat("offset x##screen image", &img.offset_x, -500.f, 500.f, "%.0f px");
+                ImGui::SliderFloat("offset y##screen image", &img.offset_y, -500.f, 500.f, "%.0f px");
+            }
+            else
+            {
+                ImGui::SliderFloat("x##screen image", &img.x, -4000.f, 4000.f, "%.0f px");
+                ImGui::SliderFloat("y##screen image", &img.y, -4000.f, 4000.f, "%.0f px");
+            }
+        }
+        menu_group_end();
+    }
+
     menu_columns_end();
 }
 
@@ -1065,11 +1164,12 @@ static void Page_VisualsScreen()
     menu_columns_end();
 }
 
-const char* kVisualsSub[3] = { "esp", "world", "screen" };
+const char* kVisualsSub[4] = { "esp", "world", "screen", "images" };
 int s_visualsSub = 0;
 void Tab_VisualsRoot()
 {
     if      (s_visualsSub == 0) Page_VisualsEsp();
     else if (s_visualsSub == 1) Page_VisualsWorld();
-    else                        Page_VisualsScreen();
+    else if (s_visualsSub == 2) Page_VisualsScreen();
+    else                        Page_VisualsImages();
 }

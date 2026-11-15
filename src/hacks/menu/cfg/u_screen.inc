@@ -58,3 +58,4 @@
     { "botoxNetEnable",           CfgEntry::BOOL,   &g_botox_net_enable, 0 },
     { "botoxNetEsp",              CfgEntry::BOOL,   &g_botox_net_esp, 0 },
     { "botoxNetWeb",              CfgEntry::BOOL,   &g_botox_net_web, 0 },
+    { "sfxImagesEnable",          CfgEntry::BOOL,   &g_sfxImagesEnable, 0 },
