@@ -15,6 +15,7 @@
 #include "../misc/game_extras.h"   // ChatTranslator_OnUserMessage -- unit game, DispatchUserMessage
 #include "../misc/game_pure.h"     // n_game::SayMsg/ParseSayText(2)/PickChatLine -- pure parsing, no SDK types
 #include "../aim/css_bridge.h"     // CssBridge_DispatchChat (SDK2/BRIDGE 11-03)
+#include "../lua/lua.h"            // g_lua.on_draw_model -- lua draw_model callback
 #include <intrin.h>       // _ReturnAddress -- net_graph must still read the real lerp
 
 // ConVar-string redirect scratch, file-local because nothing outside this file has ever
@@ -598,6 +599,17 @@ static void RenderView_SetBlend(float blend)
     if (g_renderView) VCall<void>(g_renderView, 4, blend);
 }
 
+static void RenderView_GetColor(float* rgb)
+{
+    rgb[0] = rgb[1] = rgb[2] = 1.f;
+    if (g_renderView) VCall<void>(g_renderView, 7, rgb);
+}
+
+static void RenderView_SetColor(const float* rgb)
+{
+    if (g_renderView) VCall<void>(g_renderView, 6, rgb);
+}
+
 // ==== Flat viewmodel alpha ($blendtintbybasealpha) =================================
 // WHY THE WEAPON GOES NEARLY INVISIBLE AT 0.50: SetBlend feeds the modulation alpha, and
 // every model shader then multiplies the BASE TEXTURE's alpha into it -- which on a TF2
@@ -972,9 +984,68 @@ static void __fastcall h_DrawModelExecute_impl(void* rcx, const void* pState, co
     sheenPass();
 }
 
+// lua draw_model (lua.h): scripts see each draw once. A hide returns, a tint / swap redraws through this
+// same hook (ragdolls, chams, frame blend, sheen still apply) with s_luaRedraw up so the scripts skip it.
+// Glow silhouettes and the mirror pass keep the real model.
+// ModelRenderInfo_t (SDK public/engine/ivmodelrender.h, x64): origin +0, pModel +0x20, flags +0x40,
+// entity_index +0x44, 0x58 bytes. DrawModelState_t: studiohdr +0, studiohwdata +8, decals +0x20, 0x30 bytes.
+static bool s_luaRedraw = false;
+
+static bool Lua_DrawModel(void* rcx, const void* pState, const void* pInfo, const void* pBones)
+{
+    if (s_luaRedraw || g_eject || !pState || !pInfo || RearMirror_Drawing() || Glow_Rendering() || !g_lua.draw_model_wanted())
+        return false;
+
+    const uint8_t* info = static_cast<const uint8_t*>(pInfo);
+    const char*    name = ModelNameOf(*reinterpret_cast<const void* const*>(info + 0x20));
+    if (!name) return false;
+
+    n_lua::draw_model_t draw{};
+    draw.m_name   = name;
+    draw.m_index  = *reinterpret_cast<const int*>(info + 0x44);
+    draw.m_flags  = *reinterpret_cast<const int*>(info + 0x40);
+    draw.m_origin = reinterpret_cast<const float*>(info);
+    draw.m_info   = pInfo;
+    draw.m_state  = pState;
+    g_lua.on_draw_model(draw);
+
+    if (draw.m_hide) return true;
+    const bool swap = draw.m_swap_model && pBones;
+    if (!draw.m_tint && !swap) return false;
+
+    float color[3];
+    RenderView_GetColor(color);
+    const float blend = RenderView_GetBlend();
+    if (draw.m_tint) {
+        const float tint[3] = { (draw.m_color & 0xFF) / 255.f, ((draw.m_color >> 8) & 0xFF) / 255.f, ((draw.m_color >> 16) & 0xFF) / 255.f };
+        RenderView_SetColor(tint);
+        RenderView_SetBlend(blend * ((draw.m_color >> 24) & 0xFF) / 255.f);
+    }
+
+    alignas(16) uint8_t state[0x30];
+    alignas(16) uint8_t infoCopy[0x58];
+    if (swap) {
+        memcpy(state, pState, sizeof(state));
+        memcpy(infoCopy, pInfo, sizeof(infoCopy));
+        *reinterpret_cast<const void**>(state + 0x00)    = draw.m_swap_hdr;
+        *reinterpret_cast<const void**>(state + 0x08)    = draw.m_swap_hw;
+        *reinterpret_cast<void**>(state + 0x20)          = nullptr;   // decals index the drawn mesh
+        *reinterpret_cast<const void**>(infoCopy + 0x20) = draw.m_swap_model;
+    }
+
+    s_luaRedraw = true;
+    h_DrawModelExecute(rcx, swap ? state : pState, swap ? infoCopy : pInfo, pBones);
+    s_luaRedraw = false;
+
+    RenderView_SetColor(color);
+    RenderView_SetBlend(blend);
+    return true;
+}
+
 void __fastcall h_DrawModelExecute(void* rcx, const void* pState, const void* pInfo, const void* pBones)
 {
     MiscHookGuard _g;
+    if (Lua_DrawModel(rcx, pState, pInfo, pBones)) return;
     h_DrawModelExecute_impl(rcx, pState, pInfo, pBones);
 }
 

@@ -144,6 +144,23 @@ static int no_args(lua_State*)
 	return 0;
 }
 
+static bool any_callback(const char* name)
+{
+	for (auto& script : g_lua.m_scripts) {
+		lua_State* L = script->m_state;
+		if (!L || script->m_unload_requested)
+			continue;
+
+		const int top = lua_gettop(L);
+		lua_getfield(L, LUA_REGISTRYINDEX, "botox.callbacks");
+		const bool found = lua_istable(L, -1) && lua_getfield(L, -1, name) == LUA_TTABLE && lua_rawlen(L, -1) > 0;
+		lua_settop(L, top);
+		if (found)
+			return true;
+	}
+	return false;
+}
+
 std::filesystem::path n_lua::impl_t::folder() const
 {
 	// CONFIG_PATH = "C:\botox-css\default.cfg" (globals/types.h) -- same root every other
@@ -395,6 +412,18 @@ void n_lua::impl_t::on_paint()
 	if (this->m_shutdown)
 		return;
 
+	/* this ( render thread under the queued renderer ) and draw_model ( main thread ) never share the
+	   lua states: whoever comes second skips that frame / draw. matters at map load, where paint moves
+	   from main to the render thread */
+	if (this->m_in_lua.exchange(true))
+		return;
+	struct release_t {
+		std::atomic< bool >& m_flag;
+		~release_t() { m_flag = false; }
+	} const release{ this->m_in_lua };
+
+	this->m_thread = GetCurrentThreadId();
+
 	if (!this->m_initialised) {
 		this->m_initialised = true;
 
@@ -501,6 +530,8 @@ void n_lua::impl_t::on_paint()
 		s_wasInGame = inGame;
 	}
 
+	this->m_draw_model_live = any_callback("draw_model");
+
 	n_lua_api::s_in_paint = true;
 	dispatch("paint", no_args);
 	n_lua_api::s_in_paint = false;
@@ -527,6 +558,14 @@ void n_lua::impl_t::on_frame_stage(const int stage)
 {
 	if (this->m_shutdown)
 		return;
+
+	/* draw_model swap paths load at FrameStageNotify start, before the frame draws anything, and reset
+	   out of a map ( the engine frees client models on map load ). only here + DrawModelExecute touch
+	   the swap cache, both main thread: the level edges ride on_paint, which may be the render thread */
+	if (stage == 0) {
+		if (IsInGame()) n_lua_api::load_models();
+		else n_lua_api::reset_models();
+	}
 
 	dispatch("frame_stage", [stage](lua_State* L) {
 		lua_pushinteger(L, stage);
@@ -566,6 +605,27 @@ void n_lua::impl_t::on_level_shutdown()
 {
 	if (!this->m_shutdown)
 		dispatch("level_shutdown", no_args);
+}
+
+bool n_lua::impl_t::draw_model_wanted() const
+{
+	/* nested = a script drew a model from draw_model, or the hook's own redraw */
+	return this->m_draw_model_live && !this->m_shutdown && !n_lua_api::s_draw && GetCurrentThreadId() == this->m_thread;
+}
+
+void n_lua::impl_t::on_draw_model(draw_model_t& draw)
+{
+	if (!this->draw_model_wanted() || this->m_in_lua.exchange(true))
+		return;
+
+	n_lua_api::s_draw_serial++;
+	n_lua_api::s_draw = &draw;
+	dispatch("draw_model", [](lua_State* L) {
+		n_lua_api::push_draw(L);
+		return 1;
+	});
+	n_lua_api::s_draw = nullptr;
+	this->m_in_lua    = false;
 }
 
 void n_lua::impl_t::shutdown()
