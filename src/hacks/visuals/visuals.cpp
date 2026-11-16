@@ -1011,7 +1011,10 @@ static bool Lua_DrawModel(void* rcx, const void* pState, const void* pInfo, cons
 
     if (draw.m_hide) return true;
     const bool swap = draw.m_swap_model && pBones;
-    if (!draw.m_tint && !swap) return false;
+    // model:animate: the drawn (or swapped) mesh on the script's pose. Static buffer, read inside the redraw below
+    const void* animBones = draw.m_anim_entry && pBones
+        ? n_lua::animate_draw(draw, swap ? draw.m_swap_hdr : *static_cast<const void* const*>(pState), pState) : nullptr;
+    if (!draw.m_tint && !swap && !animBones) return false;
 
     float color[3];
     RenderView_GetColor(color);
@@ -1034,7 +1037,7 @@ static bool Lua_DrawModel(void* rcx, const void* pState, const void* pInfo, cons
     }
 
     s_luaRedraw = true;
-    h_DrawModelExecute(rcx, swap ? state : pState, swap ? infoCopy : pInfo, pBones);
+    h_DrawModelExecute(rcx, swap ? state : pState, swap ? infoCopy : pInfo, animBones ? animBones : pBones);
     s_luaRedraw = false;
 
     RenderView_SetColor(color);

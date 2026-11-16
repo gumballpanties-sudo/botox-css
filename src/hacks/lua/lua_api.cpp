@@ -39,6 +39,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -55,6 +56,7 @@
 #include "../../render/render.h"    // W2S_Project
 #include "../aim/css_bridge.h"      // CssBridge_*/Css_* -- the sanctioned non-aim CSS game API
 #include "../misc/killeffects.h"    // KillEffects_DispatchParticle/_Sparks -- fx.particle/fx.sparks
+#include "../visuals/esp_preview.h" // EspPreview::AnimRoot* -- model:animate / entity:animate roots
 
 #include "lua_api.h"
 
@@ -76,6 +78,17 @@ namespace
 	struct entity_ref_t  { int m_index; };   // entity index, never a raw pointer (see css_bridge.h rule)
 
 	/* ---- seh: plain functions, no c++ objects, so __try is legal under /EHsc ---- */
+
+	/* engine work in a job: fn and everything it touches must be plain ( no unwinding objects ) */
+	bool seh_run(void (*fn)(void*), void* context)
+	{
+		__try {
+			fn(context);
+			return true;
+		} __except (EXCEPTION_EXECUTE_HANDLER) {
+			return false;
+		}
+	}
 
 	bool seh_copy(void* destination, const void* source, const std::size_t size)
 	{
@@ -1738,6 +1751,408 @@ namespace
 		return n_lua_api::s_draw;
 	}
 
+	/* ---- model:animate / entity:animate ---- */
+
+	/* path -> root: a fake C_BaseFlex ( aim/esp_preview.cpp EspPreview::AnimRoot* ) that plays the asked sequence at the origin
+	   through its own SetupBones ( Source 2013 has no CMDL::SetUpBones to call ). built at FrameStageNotify start like swaps,
+	   re-pointed after a map change ( the engine reloads model data under the same model_t ). ponytail: 16 roots, never freed
+	   ( preview rule ) */
+	struct anim_model_t {
+		const void* m_model = nullptr; /* model_t* */
+		int m_root          = -1;
+		e_swap m_state      = swap_pending;
+		bool m_rebind       = false;
+		bool m_reported     = false;
+	};
+
+	std::unordered_map< std::string, anim_model_t, path_hash, std::equal_to< > > s_anim_models;
+	constexpr std::size_t k_max_anim_models = 16;
+	constexpr int k_max_bones               = 128; /* MAXSTUDIOBONES in 2013 */
+
+	/* game frames + the game thread, both off load_models ( FrameStageNotify start ): globals.framecount here is ImGui's */
+	int s_frame                  = 0;
+	unsigned long s_main_thread  = 0;
+
+	/* studiohdr_t ints ( SDK public/studio.h, same x86 / x64, v44..v48 ): checksum +8, numbones +0x9C, boneindex +0xA0,
+	   numlocalanim +0xB4, localanimindex +0xB8, numlocalseq +0xBC, localseqindex +0xC0, numlocalposeparameters +0x12C,
+	   localposeparamindex +0x130. mstudioseqdesc_t 0xD4 bytes: szlabelindex +4, animindexindex +0x3C. mstudioanimdesc_t 100
+	   bytes: fps +8, numframes +0x10. mstudiobone_t 0xD8 bytes: name +0, parent +4, pos +0x20, quat +0x2C, flags +0xA0 */
+	struct mat34 {
+		float m[ 3 ][ 4 ];
+	};
+
+	/* out = a * b, ConcatTransforms */
+	void concat(const mat34& a, const mat34& b, mat34& out)
+	{
+		for (int r = 0; r < 3; r++)
+			for (int c = 0; c < 4; c++)
+				out.m[r][c] = a.m[r][0] * b.m[0][c] + a.m[r][1] * b.m[1][c] + a.m[r][2] * b.m[2][c] + (c == 3 ? a.m[r][3] : 0.f);
+	}
+
+	/* bones are rotation + translation: inverse = transposed rotation, rotated negative origin */
+	mat34 invert_rigid(const mat34& a)
+	{
+		mat34 out{};
+		for (int r = 0; r < 3; r++)
+			for (int c = 0; c < 3; c++)
+				out.m[r][c] = a.m[c][r];
+		for (int r = 0; r < 3; r++)
+			out.m[r][3] = -(out.m[r][0] * a.m[0][3] + out.m[r][1] * a.m[1][3] + out.m[r][2] * a.m[2][3]);
+		return out;
+	}
+
+	const std::uint8_t* bone_at(const void* hdr, const int i)
+	{
+		return static_cast< const std::uint8_t* >(hdr) + hdr_int(hdr, 0xA0) + i * 0xD8;
+	}
+
+	const char* bone_name(const std::uint8_t* bone) { return reinterpret_cast< const char* >(bone + *reinterpret_cast< const int* >(bone)); }
+	int bone_int(const std::uint8_t* bone, const int offset) { return *reinterpret_cast< const int* >(bone + offset); }
+
+	/* the bone's rest pose relative to its parent, QuaternionMatrix + position */
+	mat34 rest_local(const std::uint8_t* bone)
+	{
+		const float* p = reinterpret_cast< const float* >(bone + 0x20);
+		const float* q = reinterpret_cast< const float* >(bone + 0x2C);
+		const float x = q[0], y = q[1], z = q[2], w = q[3];
+		return { { { 1.f - 2.f * y * y - 2.f * z * z, 2.f * x * y - 2.f * w * z, 2.f * x * z + 2.f * w * y, p[0] },
+		           { 2.f * x * y + 2.f * w * z, 1.f - 2.f * x * x - 2.f * z * z, 2.f * y * z - 2.f * w * x, p[1] },
+		           { 2.f * x * z - 2.f * w * y, 2.f * y * z + 2.f * w * x, 1.f - 2.f * x * x - 2.f * y * y, p[2] } } };
+	}
+
+	const void* root_hdr(const anim_model_t& entry) { return entry.m_model && g_modelInfo ? mi_studiomodel(entry.m_model) : nullptr; }
+
+	struct anim_sequence_t {
+		const void* m_hdr;
+		const char* m_name; /* null = m_sequence is the index */
+		int m_sequence;     /* in / out, -1 = none */
+		int m_frames;       /* out, Studio_MaxFrame */
+		float m_fps;        /* out, Studio_FPS */
+		bool m_loops;       /* out, STUDIO_LOOPING */
+	};
+
+	/* own ( local ) sequences only: anim ( 0, 0 ) of the seqdesc. ponytail: blend sequences use their first animation,
+	   $includemodel sequences are not reachable, add when a model needs it */
+	void anim_sequence_job(void* context)
+	{
+		auto* const job        = static_cast< anim_sequence_t* >(context);
+		const auto* const hdr  = static_cast< const std::uint8_t* >(job->m_hdr);
+		const int count        = hdr_int(hdr, 0xBC);
+		const auto seq_at      = [&](const int i) { return hdr + hdr_int(hdr, 0xC0) + i * 0xD4; };
+
+		int sequence    = job->m_name ? -1 : job->m_sequence;
+		job->m_sequence = -1;
+		for (int i = 0; job->m_name && i < count; i++)
+			if (!_stricmp(reinterpret_cast< const char* >(seq_at(i) + *reinterpret_cast< const int* >(seq_at(i) + 4)), job->m_name)) {
+				sequence = i;
+				break;
+			}
+		if (sequence < 0 || sequence >= count)
+			return;
+
+		const std::uint8_t* const seq = seq_at(sequence);
+		const short anim              = *reinterpret_cast< const short* >(seq + *reinterpret_cast< const int* >(seq + 0x3C));
+		if (anim < 0 || anim >= hdr_int(hdr, 0xB4))
+			return;
+
+		const std::uint8_t* const desc = hdr + hdr_int(hdr, 0xB8) + anim * 100;
+		const int frames               = *reinterpret_cast< const int* >(desc + 0x10);
+		/* bone_utils.cpp Studio_MaxFrame: numframes - 1, at least 1 */
+		job->m_frames   = frames > 1 ? frames - 1 : 1;
+		job->m_fps      = *reinterpret_cast< const float* >(desc + 8);
+		job->m_loops    = (*reinterpret_cast< const int* >(seq + 0xC) & 0x1) != 0; /* seqdesc flags */
+		job->m_sequence = sequence;
+	}
+
+	alignas(16) mat34 s_anim_bones[k_max_bones];
+	alignas(16) mat34 s_old_bones[k_max_bones];
+	float s_anim_pose[24]; /* MAXSTUDIOPOSEPARAM */
+
+	/* each root's pose at the origin from its last SetupBones: every pass and every player on it this frame shares it */
+	struct root_key_t {
+		int m_sequence = -1;
+		float m_cycle  = 0.f;
+		int m_frame    = -1;
+	};
+	struct root_cache_t {
+		root_key_t m_key;
+		alignas(16) mat34 m_bones[k_max_bones];
+	};
+	root_cache_t s_root_cache[16]; /* by EspPreview root id */
+
+	/* target bone -> root bone of the same name, -1 = none. a few pairs: body and weapon alternate every pass */
+	struct bone_map_t {
+		const void* m_root   = nullptr;
+		const void* m_target = nullptr;
+		int m_root_sum = 0, m_target_sum = 0;
+		int m_map[k_max_bones];
+	};
+	bone_map_t s_maps[8];
+	int s_map_next = 0;
+
+	const int* bone_map(const void* root, const void* target)
+	{
+		for (bone_map_t& map : s_maps)
+			if (map.m_root == root && map.m_target == target && map.m_root_sum == hdr_int(root, 8) && map.m_target_sum == hdr_int(target, 8))
+				return map.m_map;
+
+		bone_map_t& map = s_maps[s_map_next];
+		s_map_next      = (s_map_next + 1) % 8;
+		map.m_root      = nullptr;
+		for (int i = 0; i < hdr_int(target, 0x9C); i++) {
+			map.m_map[i]           = -1;
+			const char* const name = bone_name(bone_at(target, i));
+			for (int j = 0; j < hdr_int(root, 0x9C); j++)
+				if (!_stricmp(name, bone_name(bone_at(root, j)))) {
+					map.m_map[i] = j;
+					break;
+				}
+		}
+		map.m_root       = root;
+		map.m_target     = target;
+		map.m_root_sum   = hdr_int(root, 8);
+		map.m_target_sum = hdr_int(target, 8);
+		return map.m_map;
+	}
+
+	struct anim_pose_t {
+		const anim_model_t* m_entry;
+		int m_sequence;
+		float m_cycle;
+		const void* m_target;
+		const mat34* m_to_world;
+		const int* m_map; /* out: target bone -> root bone */
+		bool m_ok;        /* out */
+	};
+
+	void anim_pose_job(void* context)
+	{
+		auto* const job          = static_cast< anim_pose_t* >(context);
+		const void* const root   = root_hdr(*job->m_entry);
+		const void* const target = job->m_target;
+		const int root_bones     = root ? hdr_int(root, 0x9C) : 0;
+		const int target_bones   = hdr_int(target, 0x9C);
+		if (root_bones <= 0 || root_bones > k_max_bones || target_bones <= 0 || target_bones > k_max_bones || job->m_sequence < 0 ||
+		    job->m_sequence >= hdr_int(root, 0xBC))
+			return;
+
+		const int id = job->m_entry->m_root;
+		if (id < 0 || id >= 16)
+			return;
+
+		root_cache_t& cache = s_root_cache[id];
+		const root_key_t key{ job->m_sequence, job->m_cycle, s_frame };
+		if (key.m_sequence != cache.m_key.m_sequence || key.m_cycle != cache.m_key.m_cycle || key.m_frame != cache.m_key.m_frame) {
+			/* bone_utils.cpp Studio_CalcDefaultPoseParameters: the zero state when the range holds one, else the middle.
+			   mstudioposeparamdesc_t: start +8, end +12, 20 bytes */
+			const auto* const poses = static_cast< const std::uint8_t* >(root) + hdr_int(root, 0x130);
+			for (int i = 0; i < 24; i++) {
+				s_anim_pose[i] = 0.5f;
+				if (i >= hdr_int(root, 0x12C))
+					continue;
+				const float start = *reinterpret_cast< const float* >(poses + i * 20 + 8);
+				const float end   = *reinterpret_cast< const float* >(poses + i * 20 + 12);
+				if (start < 0.f && end > 0.f)
+					s_anim_pose[i] = -start / (end - start);
+			}
+
+			cache.m_key = {}; /* a failed pose leaves no key behind */
+			if (EspPreview::AnimRootPose(id, job->m_sequence, job->m_cycle, s_anim_pose, cache.m_bones, k_max_bones) <= 0)
+				return;
+			cache.m_key = key;
+		}
+
+		const int* const map = bone_map(root, target);
+
+		/* studiomdl orders parents before children, so a parent is always built first */
+		for (int i = 0; i < target_bones; i++) {
+			if (map[i] >= 0) {
+				concat(*job->m_to_world, cache.m_bones[map[i]], s_anim_bones[i]);
+				continue;
+			}
+
+			const std::uint8_t* const bone = bone_at(target, i);
+			const int parent               = bone_int(bone, 0x4);
+			concat(parent >= 0 && parent < i ? s_anim_bones[parent] : *job->m_to_world, rest_local(bone), s_anim_bones[i]);
+		}
+
+		job->m_map = map;
+		job->m_ok  = true;
+	}
+
+	/* entity:animate: applied to the entity's real bones right after BuildTransformations ( aim/hooks.cpp: C_BaseFlex's, before
+	   C_CSPlayer sets the weapon up off them, and C_CSPlayer's, after its left hand IK ), before SetupBones builds attachments.
+	   so the bone cache, attachments and everything parented or bone merged to the entity follow. a script sets it every frame:
+	   older than last frame = the script stopped */
+	struct entity_anim_t {
+		int m_entity                = 0;
+		const anim_model_t* m_entry = nullptr;
+		int m_sequence              = 0;
+		float m_cycle               = 0.f;
+		int m_frame                 = -10;
+	};
+	entity_anim_t s_entity_anims[8];
+
+	struct entity_pose_t {
+		anim_pose_t m_pose;
+		std::uint8_t* m_entity;
+		int m_cache; /* offset of m_CachedBoneData ( CUtlVector< matrix3x4 >: memory +0, size +0x10 ) */
+		int m_mask;
+		bool m_ok; /* out */
+	};
+
+	/* rewrites the bones BuildTransformations just wrote ( m_BoneAccessor points at m_CachedBoneData ), only the ones this setup
+	   asked for. bones the animation lacks keep their own motion ( jiggle, procedural ) relative to their parent */
+	void entity_pose_job(void* context)
+	{
+		auto* const job = static_cast< entity_pose_t* >(context);
+		anim_pose_job(&job->m_pose);
+		if (!job->m_pose.m_ok)
+			return;
+
+		mat34* const bones       = *reinterpret_cast< mat34** >(job->m_entity + job->m_cache);
+		const void* const target = job->m_pose.m_target;
+		const int count          = std::min(*reinterpret_cast< const int* >(job->m_entity + job->m_cache + 0x10), hdr_int(target, 0x9C));
+		if (!bones || count <= 0)
+			return;
+
+		std::memcpy(s_old_bones, bones, sizeof(mat34) * count);
+		for (int i = 0; i < count; i++) {
+			const std::uint8_t* const bone = bone_at(target, i);
+			if (!(bone_int(bone, 0xA0) & job->m_mask))
+				continue;
+
+			if (job->m_pose.m_map[i] >= 0) {
+				bones[i] = s_anim_bones[i];
+				continue;
+			}
+
+			const int parent = bone_int(bone, 0x4);
+			if (parent < 0 || parent >= i)
+				continue;
+
+			mat34 local;
+			concat(invert_rigid(s_old_bones[parent]), s_old_bones[i], local);
+			concat(bones[parent], local, bones[i]);
+		}
+
+		job->m_ok = true;
+	}
+
+	struct animation_t {
+		const anim_model_t* m_entry = nullptr;
+		int m_sequence              = 0;
+		float m_cycle               = 0.f;
+		double m_length             = 0.0;
+	};
+
+	/* ( path, sequence, cycle ) at stack index first. false = not a .mdl, still loading, failed, or no such sequence */
+	bool resolve_animation(lua_State* L, const int first, animation_t& out)
+	{
+		const char* const path      = luaL_checkstring(L, first);
+		const char* const name      = lua_type(L, first + 1) == LUA_TSTRING ? lua_tostring(L, first + 1) : nullptr;
+		const lua_Integer raw_index = name ? -1 : luaL_checkinteger(L, first + 1);
+		const int index             = raw_index >= 0 && raw_index <= 0xFFFF ? static_cast< int >(raw_index) : -1;
+		const lua_Number raw_cycle  = luaL_optnumber(L, first + 2, 0.0);
+		const std::string_view view = path;
+
+		/* studio models only, same as swaps. game thread only: paint may run on the render thread here, and load_models walks
+		   the same map on the game thread ( frame_stage / create_move / draw_model are game thread ) */
+		if (!g_modelInfo || GetCurrentThreadId() != s_main_thread || view.size() < 5 || _stricmp(path + view.size() - 4, ".mdl") != 0)
+			return false;
+
+		auto found = s_anim_models.find(view);
+		if (found == s_anim_models.end()) {
+			if (s_anim_models.size() >= k_max_anim_models)
+				return false;
+			found = s_anim_models.try_emplace(std::string(view)).first;
+		}
+
+		const anim_model_t& entry = found->second;
+		if (entry.m_state != swap_ready || entry.m_rebind)
+			return false;
+
+		anim_sequence_t job{ root_hdr(entry), name, index, 0, 0.f, false };
+		if (!job.m_hdr || !seh_run(&anim_sequence_job, &job) || job.m_sequence < 0)
+			return false;
+
+		/* c_baseanimating.cpp ClampCycle: a looping sequence wraps, a one shot holds its last frame. a NaN cycle would index
+		   frames with garbage */
+		const double finite = std::isfinite(raw_cycle) ? raw_cycle : 0.0;
+		const double cycle  = job.m_loops ? finite - std::floor(finite) : std::clamp(finite, 0.0, 0.999);
+		const bool moving  = job.m_fps > 0.f && std::isfinite(job.m_fps);
+
+		out.m_entry    = &entry;
+		out.m_sequence = job.m_sequence;
+		out.m_cycle    = static_cast< float >(cycle);
+		out.m_length   = moving ? job.m_frames / job.m_fps : 0.0;
+		return true;
+	}
+
+	/* model:animate( path, sequence, cycle ) -> sequence length in seconds. nil = model still loading / failed, or no such sequence */
+	int l_draw_animate(lua_State* L)
+	{
+		n_lua::draw_model_t* draw = check_draw(L);
+		draw->m_anim_entry        = nullptr;
+		if (lua_isnoneornil(L, 2))
+			return 0;
+
+		animation_t animation;
+		if (!resolve_animation(L, 2, animation)) {
+			lua_pushnil(L);
+			return 1;
+		}
+
+		draw->m_anim_entry    = animation.m_entry;
+		draw->m_anim_sequence = animation.m_sequence;
+		draw->m_anim_cycle    = animation.m_cycle;
+		lua_pushnumber(L, animation.m_length);
+		return 1;
+	}
+
+	/* entity:animate( path, sequence, cycle ) -> sequence length in seconds, nil like model:animate. entity:animate( nil ) stops */
+	int l_entity_animate(lua_State* L)
+	{
+		/* s_entity_anims is read by the BuildTransformations hooks on the game thread; paint may be the render thread here */
+		if (GetCurrentThreadId() != s_main_thread)
+			return luaL_error(L, "entity:animate runs on the game thread only: call it from frame_stage or create_move");
+
+		const int index = entity_index(L, 1);
+		check_entity_ptr(L);
+		/* on anyone else botox's own bone reads ( aimbot, backtrack, esp ) would see the pose */
+		if (index != GetLocalPlayerIndex())
+			return luaL_error(L, "entity:animate works on your own player only ( others: model:animate in draw_model )");
+
+		entity_anim_t* slot = nullptr;
+		for (entity_anim_t& anim : s_entity_anims)
+			if (anim.m_entity == index)
+				slot = &anim;
+
+		if (lua_isnoneornil(L, 2)) {
+			if (slot)
+				*slot = {};
+			return 0;
+		}
+
+		animation_t animation;
+		if (!resolve_animation(L, 2, animation)) {
+			lua_pushnil(L);
+			return 1;
+		}
+
+		for (entity_anim_t& anim : s_entity_anims)
+			if (!slot && (!anim.m_entry || anim.m_frame < s_frame - 1))
+				slot = &anim;
+		if (!slot) {
+			lua_pushnil(L);
+			return 1;
+		}
+
+		*slot = { index, animation.m_entry, animation.m_sequence, animation.m_cycle, s_frame };
+		lua_pushnumber(L, animation.m_length);
+		return 1;
+	}
+
 	int l_draw_index(lua_State* L)
 	{
 		n_lua::draw_model_t* draw  = check_draw(L);
@@ -1753,6 +2168,7 @@ namespace
 		else if (key == "hide") lua_pushboolean(L, draw->m_hide);
 		else if (key == "color") lua_pushinteger(L, static_cast< lua_Integer >(draw->m_color));
 		else if (key == "model" && draw->m_swap_name) lua_pushstring(L, draw->m_swap_name);
+		else if (key == "animate") lua_pushcfunction(L, l_draw_animate);
 		else if (key == "ptr") push_address(L, draw->m_info);
 		else lua_pushnil(L);
 		return 1;
@@ -1841,6 +2257,35 @@ void n_lua_api::load_models()
 		if (entry.m_state == swap_failed && first_report(entry))
 			console_msg("[lua] draw_model: can't load " + path + " ( missing .mdl / .vvd / .vtx, or sv_pure: sv_pure bypass checkbox )");
 	}
+
+	s_frame++;
+	s_main_thread = GetCurrentThreadId();
+
+	/* animation roots: each build / re-point is a synchronous mdl read, one a frame */
+	bool built = false;
+	for (auto& [path, entry] : s_anim_models) {
+		const bool rebind = entry.m_state == swap_ready && entry.m_rebind;
+		if (built || (entry.m_state != swap_pending && !rebind))
+			continue;
+		built = true;
+
+		const void* const model = load_model(path.c_str());
+		const void* const hdr   = model ? mi_studiomodel(model) : nullptr;
+		const char* why         = !hdr ? " ( missing .mdl, or sv_pure: sv_pure bypass checkbox )"
+		                          : hdr_int(hdr, 0x9C) > k_max_bones ? " ( more than 128 bones )" : nullptr;
+		if (!why) {
+			entry.m_model = model;
+			if (entry.m_root >= 0 ? !EspPreview::AnimRootBind(entry.m_root, model) : (entry.m_root = EspPreview::AnimRootCreate(model)) < 0) {
+				entry.m_root = -1;
+				why          = " ( animation entity failed, or 16 roots used )";
+			}
+		}
+
+		entry.m_rebind = false;
+		entry.m_state  = why ? swap_failed : swap_ready;
+		if (why && !std::exchange(entry.m_reported, true))
+			console_msg("[lua] animate: can't load " + path + why);
+	}
 }
 
 void n_lua_api::reset_models()
@@ -1849,6 +2294,84 @@ void n_lua_api::reset_models()
 		entry.m_model = nullptr;
 		entry.m_state = swap_pending;
 	}
+
+	s_main_thread = GetCurrentThreadId(); /* FrameStageNotify start, game thread, same as load_models */
+
+	/* out of a map ( called every frame there ): roots re-point on the next map, failed ones ( sv_pure bypass changed ) retry */
+	for (auto& [path, entry] : s_anim_models) {
+		if (entry.m_state == swap_ready)
+			entry.m_rebind = true;
+		else if (entry.m_state == swap_failed)
+			entry.m_state = swap_pending;
+	}
+
+	/* entity indexes mean other players on the next map */
+	for (entity_anim_t& anim : s_entity_anims)
+		anim = {};
+}
+
+const void* n_lua::animate_draw(const draw_model_t& draw, const void* target_hdr, const void* state)
+{
+	if (!draw.m_anim_entry || !target_hdr || !state || GetCurrentThreadId() != s_main_thread)
+		return nullptr;
+
+	/* DrawModelState_t x64: pModelToWorld +0x18 */
+	const auto* const to_world = *reinterpret_cast< const mat34* const* >(static_cast< const std::uint8_t* >(state) + 0x18);
+	if (!to_world)
+		return nullptr;
+
+	anim_pose_t job{ static_cast< const anim_model_t* >(draw.m_anim_entry), draw.m_anim_sequence, draw.m_anim_cycle, target_hdr, to_world, nullptr, false };
+	return seh_run(&anim_pose_job, &job) && job.m_ok ? s_anim_bones : nullptr;
+}
+
+void n_lua::pose_entity_bones(void* entity, const void* studio_hdr, const void* camera_transform, const int bone_mask)
+{
+	if (!entity || !studio_hdr || !camera_transform)
+		return;
+
+	bool live = false;
+	for (const entity_anim_t& anim : s_entity_anims)
+		live |= anim.m_entry && anim.m_frame >= s_frame - 1 && anim.m_frame <= s_frame;
+
+	/* the roots are game thread state ( built and posed there ). ponytail: a threaded bone setup keeps the real pose */
+	if (!live || g_lua.m_shutdown || GetCurrentThreadId() != s_main_thread)
+		return;
+
+	/* your own player in third person only: first person draws no body, and the camera / shoot position bone reads must keep
+	   the real pose. g_input vtable 31 = CAM_IsThirdPerson ( visuals/world_fx.cpp ) */
+	if (GetClientEntity(GetLocalPlayerIndex()) != entity || !g_input ||
+	    !reinterpret_cast< int(__fastcall*)(void*) >((*static_cast< void*** >(g_input))[31])(g_input))
+		return;
+
+	const entity_anim_t* anim = nullptr;
+	for (const entity_anim_t& slot : s_entity_anims)
+		if (slot.m_entry && slot.m_frame >= s_frame - 1 && slot.m_frame <= s_frame && GetClientEntity(slot.m_entity) == entity)
+			anim = &slot;
+	if (!anim)
+		return;
+
+	/* m_CachedBoneData = m_hLightingOrigin - 88, Amalgam CBaseAnimating.h ( TF2 ). CS:S x64 disasm 11-16: every member here sits
+	   0x38 below TF2's ( BuildTransformations' m_BoneAccessor 0x848 -> 0x810, m_hLightingOrigin 0xBD8 -> 0xBA0 ), so the -88 holds.
+	   CStudioHdr: studiohdr_t* first, no vtable */
+	/* own walk, once: class_netvar's cache map belongs to the lua thread ( the render thread under mat_queue_mode 2 ) */
+	static int s_lighting = -1;
+	if (s_lighting < 0) {
+		s_lighting = 0;
+		for (ClientClass* entry = GetAllClasses(); entry; entry = entry->m_pNext)
+			if (entry->m_pNetworkName && std::strcmp(entry->m_pNetworkName, "CBaseAnimating") == 0) {
+				const int found = FindPropOffset(entry->m_pRecvTable, "m_hLightingOrigin", 0, 0);
+				s_lighting      = found > 0 ? found : 0;
+				break;
+			}
+	}
+	const int lighting = s_lighting;
+	if (lighting <= 88)
+		return;
+
+	entity_pose_t job{ { anim->m_entry, anim->m_sequence, anim->m_cycle, *static_cast< const void* const* >(studio_hdr),
+		                 static_cast< const mat34* >(camera_transform), nullptr, false },
+		               static_cast< std::uint8_t* >(entity), lighting - 88, bone_mask, false };
+	seh_run(&entity_pose_job, &job);
 }
 
 void n_lua_api::open(lua_State* L)
@@ -1905,6 +2428,7 @@ void n_lua_api::open(lua_State* L)
 		                                        { "bone_position", l_entity_bone_position }, { "hitbox_position", l_entity_hitbox_position },
 		                                        { "get_prop", l_entity_get_prop }, { "set_prop", l_entity_set_prop },
 		                                        { "get_datafield", l_entity_get_datafield }, { "set_datafield", l_entity_set_datafield },
+		                                        { "animate", l_entity_animate },
 		                                        { nullptr, nullptr } };
 	static const luaL_Reg entity_meta[] = { { "__eq", l_entity_eq }, { "__tostring", l_entity_tostring }, { nullptr, nullptr } };
 	new_meta(L, k_entity_meta, entity_methods, entity_meta);

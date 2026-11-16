@@ -79,6 +79,8 @@ static const std::vector<std::string> s_vHookWhitelist =
 	// bone + animation fidelity for hitbox aiming
 	"CBaseAnimating_UpdateClientSideAnimation",
 	"CBaseAnimating_MaintainSequenceTransitions",
+	"CBaseFlex_BuildTransformations",   // lua entity:animate (pose after the engine's bones, before attachments)
+	"CCSPlayer_BuildTransformations",
 	"CBaseAnimating_Interpolate",
 	"CBaseViewModel_Interpolate",   // remove interp: viewmodel cycle steps per tick
 	"CBaseAnimating_SetSequence",

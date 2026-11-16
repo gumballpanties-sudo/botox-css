@@ -114,7 +114,8 @@ namespace
 	// our own calls on the game thread: the GetModel / lightcache hooks act only inside them
 	std::atomic<DWORD> s_gameThread{ 0 };
 	bool s_inCall = false;
-	struct CallScope { CallScope() { s_inCall = true; s_gameThread = GetCurrentThreadId(); } ~CallScope() { s_inCall = false; } };
+	// nests: a lua animation root posed from a draw inside the preview's own call must not end the outer scope
+	struct CallScope { bool prev; CallScope() : prev(s_inCall) { s_inCall = true; s_gameThread = GetCurrentThreadId(); } ~CallScope() { s_inCall = prev; } };
 	bool InOurCall() { return s_inCall && GetCurrentThreadId() == s_gameThread.load(); }
 
 	alignas(16) matrix3x4 s_bones[MAXSTUDIOBONES];
@@ -176,6 +177,23 @@ namespace
 	double Now() { return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
 
 	template <typename F> bool Seh(F&& f) { __try { f(); return true; } __except (EXCEPTION_EXECUTE_HANDLER) { return false; } }
+
+	// lua model:animate / entity:animate roots (EspPreview::AnimRoot*): one more fake ent per animation model. A plugin's
+	// model has no precache index in a map, so each sits on a reserved index the GetModel hook answers inside our calls
+	constexpr int kLuaRootIndex = 0x7F00, kLuaRoots = 16;
+	const model_t* s_luaRootModels[kLuaRoots] = {};
+	CBaseEntity* s_luaRoots[kLuaRoots] = {};
+	void* s_luaRootVt[kLuaRoots][kVtSlots + 1] = {};
+	int s_luaRootCount = 0;
+
+	// the fake ent's sigs, shared by the preview Init and the lua roots (lua may want them with the preview off)
+	bool ScanEntSigs()
+	{
+		if (!s_ctor) s_ctor = reinterpret_cast<Ctor_t>(U::Memory.FindSignature("client.dll", "48 89 5C 24 ? 48 89 6C 24 ? 48 89 74 24 ? 57 41 56 41 57 48 83 EC ? 48 8B D9 E8 ? ? ? ? 33 ED"));
+		if (!s_setModelByIndex) s_setModelByIndex = reinterpret_cast<SetModelByIndex_t>(U::Memory.FindSignature("client.dll", "48 89 5C 24 ? 57 48 83 EC ? 66 89 91"));
+		if (!s_setAbsAngles) s_setAbsAngles = reinterpret_cast<SetAbsAngles_t>(U::Memory.FindSignature("client.dll", "48 89 5C 24 ? 57 48 81 EC ? ? ? ? 48 8B FA 48 8B D9 E8 ? ? ? ? F3 0F 10 83"));
+		return s_ctor && s_setModelByIndex && s_setAbsAngles;
+	}
 }
 
 // ---- hooks (aim.cpp whitelist) ----------------------------------------------------------------
@@ -189,6 +207,8 @@ MAKE_HOOK(CModelInfoClient_GetModel,
 		const model_t* p = iIndex == kMenuIndex ? s_model : s_gunModel;
 		if (p) return p;
 	}
+	if (iIndex >= kLuaRootIndex && iIndex < kLuaRootIndex + kLuaRoots && InOurCall())
+		return s_luaRootModels[iIndex - kLuaRootIndex];   // null on purpose while a root is re-pointed
 	return CALL_ORIGINAL(rcx, iIndex);
 }
 
@@ -394,11 +414,9 @@ namespace
 		switch (s_stage)
 		{
 		case 0:
-			s_ctor = reinterpret_cast<Ctor_t>(U::Memory.FindSignature("client.dll", "48 89 5C 24 ? 48 89 6C 24 ? 48 89 74 24 ? 57 41 56 41 57 48 83 EC ? 48 8B D9 E8 ? ? ? ? 33 ED"));
-			s_setModelByIndex = reinterpret_cast<SetModelByIndex_t>(U::Memory.FindSignature("client.dll", "48 89 5C 24 ? 57 48 83 EC ? 66 89 91"));
+			ScanEntSigs();
 			break;
 		case 1:
-			s_setAbsAngles = reinterpret_cast<SetAbsAngles_t>(U::Memory.FindSignature("client.dll", "48 89 5C 24 ? 57 48 81 EC ? ? ? ? 48 8B FA 48 8B D9 E8 ? ? ? ? F3 0F 10 83"));
 			if (auto fn = reinterpret_cast<void* (*)(const char*, int*)>(GetProcAddress(GetModuleHandleA("studiorender.dll"), "CreateInterface")))
 				s_studioRender = fn("VStudioRender025", nullptr);
 			if (!s_ctor || !s_setModelByIndex || !s_setAbsAngles || !s_studioRender || !g_matSystem || !g_modelRender)
@@ -614,6 +632,73 @@ void EspPreview::OnEject()
 	EspPreview::DropTexture();
 	s_ready = false;
 	s_failed = true;
+}
+
+// ---- lua animation roots ----------------------------------------------------------------------
+
+bool EspPreview::IsAnimRoot(const void* entity)
+{
+	for (int i = 0; entity && i < s_luaRootCount; i++)
+		if (s_luaRoots[i] == entity)
+			return true;
+	return false;
+}
+
+int EspPreview::AnimRootCreate(const void* model)
+{
+	if (!model || s_luaRootCount >= kLuaRoots || !ScanEntSigs())
+		return -1;
+	const int id = s_luaRootCount;
+	CBaseEntity* ent = MakeEnt(s_luaRootVt[id]);
+	if (!ent)
+		return -1;
+	s_luaRoots[id] = ent;
+	s_luaRootCount++;
+	return AnimRootBind(id, model) ? id : -1;
+}
+
+bool EspPreview::AnimRootBind(int id, const void* model)
+{
+	if (id < 0 || id >= s_luaRootCount || !s_luaRoots[id] || !model)
+		return false;
+	CBaseEntity* ent = s_luaRoots[id];
+	CallScope _c;
+	// null first: SetModelPointer only runs OnNewModel on a change, and a map change reloads the data behind
+	// the same model_t (the ent's CStudioHdr would keep the freed one)
+	s_luaRootModels[id] = nullptr;
+	bool ok = Seh([&]() { s_setModelByIndex(ent, kLuaRootIndex + id); });
+	s_luaRootModels[id] = static_cast<const model_t*>(model);
+	ok = ok && Seh([&]() { s_setModelByIndex(ent, kLuaRootIndex + id); });
+	if (!ok)
+		s_luaRoots[id] = nullptr;   // leaked: its state is unknown
+	return ok;
+}
+
+int EspPreview::AnimRootPose(int id, int sequence, float cycle, const float* poseParameters, void* bonesOut, int maxBones)
+{
+	if (id < 0 || id >= s_luaRootCount || !s_luaRoots[id] || !I::GlobalVars)
+		return 0;
+	CBaseEntity* ent = s_luaRoots[id];
+	static const int nAnimTime = U::NetVars.GetNetVar("CBaseEntity", "m_flAnimTime");
+	static const int nPose = U::NetVars.GetNetVar("CBaseAnimating", "m_flPoseParameter");
+	const studiohdr_t* pHdr = s_luaRootModels[id] ? I::ModelInfoClient->GetStudiomodel(s_luaRootModels[id]) : nullptr;
+	if (!pHdr || !nPose || pHdr->numbones <= 0 || pHdr->numbones > maxBones)
+		return 0;
+
+	int count = 0;
+	CallScope _c;
+	Seh([&]() {
+		auto pAnim = ent->As<CBaseAnimating>();
+		pAnim->m_nSequence() = sequence;
+		pAnim->m_flCycle() = cycle;
+		*reinterpret_cast<float*>(uintptr_t(ent) + nAnimTime) = I::GlobalVars->curtime;
+		std::memcpy(reinterpret_cast<void*>(uintptr_t(ent) + nPose), poseParameters, sizeof(float) * 24);   // MAXSTUDIOPOSEPARAM
+		s_setAbsAngles(ent, Vec3(0.f, 0.f, 0.f));   // origin stays 0: bones come back at identity
+		ent->InvalidateBoneCache();
+		if (ent->SetupBones(static_cast<matrix3x4*>(bonesOut), maxBones, BONE_USED_BY_ANYTHING, I::GlobalVars->curtime))
+			count = pHdr->numbones;
+	});
+	return count;
 }
 
 // ---- 2d esp -----------------------------------------------------------------------------------

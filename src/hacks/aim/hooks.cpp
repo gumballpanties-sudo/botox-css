@@ -11,6 +11,7 @@
 #include "nospread_hitscan.h"
 #include "esp.h"
 #include "../visuals/esp_preview.h"
+#include "../lua/lua.h"   // n_lua::pose_entity_bones (entity:animate)
 #include "backtrack.h"
 #include "scope_fov.h"
 #include "hud_aim.h"   // unit hud: botox hud group data, collected in IEngineVGui_Paint
@@ -52,6 +53,30 @@ MAKE_HOOK(CBaseAnimating_Interpolate, S::CBaseAnimating_Interpolate(), bool,
 	return CALL_ORIGINAL(rcx, currentTime);
 }
 
+// ================ BuildTransformations: lua entity:animate ================
+// CS:S x64 client.dll, RTTI walk 11-16: C_BaseAnimating vtable slot 164 = BuildTransformations (instruction shape 0.75
+// against TF2's slot 165 base, neighbours <= 0.21; the m_BoneAccessor bone writes at [this+0x810]). C_BaseFlex /
+// C_BaseCombatCharacter / C_BasePlayer share the override below, C_CSPlayer has its own: it calls that one first, then
+// sets the active weapon's bones up off the result (BONE_USED_BY_ANYTHING) for its left hand IK. So the pose goes in
+// twice: after C_BaseFlex's (the weapon's bone merge then reads it), and after C_CSPlayer's (undoes the IK pull).
+// Both patterns unique in the live client.dll.
+MAKE_SIGNATURE(CBaseFlex_BuildTransformations, "client.dll", "4C 8B DC 4D 89 4B 20 4D 89 43 18 49 89 53 10 53", 0x0);
+MAKE_SIGNATURE(CCSPlayer_BuildTransformations, "client.dll", "48 89 4C 24 08 55 41 54 41 56 48 8D AC 24 40 FE FF FF", 0x0);
+
+MAKE_HOOK(CBaseFlex_BuildTransformations, S::CBaseFlex_BuildTransformations(), void,
+	void* rcx, void* hdr, void* pos, void* q, const matrix3x4& cameraTransform, int boneMask, void* boneComputed)
+{
+	CALL_ORIGINAL(rcx, hdr, pos, q, cameraTransform, boneMask, boneComputed);
+	n_lua::pose_entity_bones(rcx, hdr, &cameraTransform, boneMask);
+}
+
+MAKE_HOOK(CCSPlayer_BuildTransformations, S::CCSPlayer_BuildTransformations(), void,
+	void* rcx, void* hdr, void* pos, void* q, const matrix3x4& cameraTransform, int boneMask, void* boneComputed)
+{
+	CALL_ORIGINAL(rcx, hdr, pos, q, cameraTransform, boneMask, boneComputed);
+	n_lua::pose_entity_bones(rcx, hdr, &cameraTransform, boneMask);
+}
+
 // ================ CBaseAnimating_MaintainSequenceTransitions.cpp ================
 MAKE_SIGNATURE(CBaseAnimating_MaintainSequenceTransitions, "client.dll", "4C 89 4C 24 ? 41 56", 0x0);
 
@@ -68,6 +93,9 @@ MAKE_HOOK(CBaseAnimating_MaintainSequenceTransitions, S::CBaseAnimating_Maintain
 	// non-injected when idle. (The engine itself already early-returns this during prediction, so the
 	// local player's predicted pose is unaffected either way.) Same targets as Interpolate.
 	if (RemoveInterpTarget(rcx))
+		return;
+	// lua animation roots: one ent serves every script / player, so it must show exactly the asked sequence + cycle
+	if (EspPreview::IsAnimRoot(rcx))
 		return;
 
 	CALL_ORIGINAL(rcx, boneSetup, flCycle, pos, q);
