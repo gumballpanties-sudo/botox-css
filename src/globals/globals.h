@@ -380,6 +380,15 @@ extern bool  g_emphasizeEnable;
 extern float g_emphasizeAmount;
 extern bool  g_emphasizeSpherical;
 extern bool  g_showDepthEnable;   // debug view -- reuses screenfx.cpp's resolved depth texture
+// adaptive fog (screenfx_passes.cpp ScreenFxPasses_AdaptiveFog, reshade OtisFX AdaptiveFog.fx)
+extern bool  g_adaptiveFogEnable;
+extern float g_adaptiveFogColor[4];
+extern float g_adaptiveFogMax;
+extern float g_adaptiveFogCurve;
+extern float g_adaptiveFogStart;
+extern float g_adaptiveFogBloomThreshold;
+extern float g_adaptiveFogBloomPower;
+extern float g_adaptiveFogBloomWidth;
 // botox depth_view knobs (screenfx_passes.cpp ScreenFxPasses_DepthView, drawn from the post slot)
 extern float g_emphasizeFocusDepth;
 extern float g_emphasizeFocusRange;
@@ -510,7 +519,7 @@ extern float g_chTaperFar;           // arm half-thickness scale at the outer en
 extern bool  g_chDotCustomColor;
 extern float g_chDotColor[4];
 extern float g_chRotation;           // degrees, whole crosshair about its centre
-extern bool  g_forceCrosshair;       // keep the custom crosshair up while holding an unscoped sniper
+extern bool  g_forceCrosshair;       // custom + csgo crosshair also draw on an unscoped sniper
 
 // -- Sniper crosshair (botox indicators.cpp sniper_crosshair, new unit) ------------------------
 // Drawn only while holding a scoped (sniper-class) weapon and NOT currently zoomed in

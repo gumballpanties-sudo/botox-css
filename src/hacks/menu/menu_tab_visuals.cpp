@@ -659,6 +659,24 @@ static void Page_VisualsScreen()
                 SliderF("particle guard##dof", &g_fxParticleGuard, 0.f, 1.f, "%.2f");
             }, ImVec2(220.f, -1.f));
 
+        // botox adaptive fog (OtisFX AdaptiveFog.fx knobs + ranges), drawn under dof
+        ImGui::Checkbox("adaptive fog", &g_adaptiveFogEnable);
+        if (g_adaptiveFogEnable)
+            ImGui::OptionPopup("adaptive fog settings", [&]() {
+                constexpr ImGuiColorEditFlags k_fogNoAlpha = ImGuiColorEditFlags_NoOptions | ImGuiColorEditFlags_InputRGB |
+                    ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoDragDrop |
+                    ImGuiColorEditFlags_PickerHueBar | ImGuiColorEditFlags_NoBorder | ImGuiColorEditFlags_NoAlpha;
+                ImGui::ColorRow("fog color##adaptive fog", g_adaptiveFogColor, k_fogNoAlpha);
+                SliderF("max fog##adaptive fog", &g_adaptiveFogMax, 0.f, 1.f, "%.3f");
+                SliderF("fog curve##adaptive fog", &g_adaptiveFogCurve, 0.f, 175.f, "%.2f");
+                SliderF("fog start##adaptive fog", &g_adaptiveFogStart, 0.f, 1.f, "%.3f");
+
+                ImGui::Label("bloom");
+                SliderF("threshold##adaptive fog", &g_adaptiveFogBloomThreshold, 0.f, 50.f, "%.2f");
+                SliderF("power##adaptive fog", &g_adaptiveFogBloomPower, 0.f, 100.f, "%.1f");
+                SliderF("width##adaptive fog", &g_adaptiveFogBloomWidth, 0.f, 1.f, "%.3f");
+            }, ImVec2(220.f, -1.f));
+
         ImGui::Checkbox("ambient occlusion", &g_aoEnable);
         if (g_aoEnable)
             ImGui::OptionPopup("ambient occlusion settings", [&]() {
@@ -1094,14 +1112,13 @@ static void Page_VisualsScreen()
             }, ImVec2(220.f, -1));
         }
 
-        // botox misc.cpp force_crosshair checkbox: keeps the crosshair above up while holding an
-        // unscoped sniper weapon instead of yielding to the sniper crosshair's own hide rule.
-        // CSS has no weapon_debug_spread_show-equivalent debug convar (grepped, see report), so
-        // unlike botox this never forces anything to draw while actually zoomed in.
+        // botox misc.cpp force_crosshair: crosshair on an unscoped sniper. CS:S has no
+        // weapon_debug_spread_show and draws no stock sniper crosshair, so this gates the
+        // custom + csgo crosshairs (crosshair.cpp RenderCrosshair). Never while zoomed in.
         ImGui::Checkbox("force crosshair##ch", &g_forceCrosshair);
         if (ImGui::IsItemHovered())
-            MenuTooltip("keep the crosshair up while holding a scoped weapon that isn't\n"
-                        "zoomed in yet, instead of hiding it for the sniper crosshair");
+            MenuTooltip("show the custom / csgo crosshair on a sniper (awp/scout/sg550/g3sg1)\n"
+                        "that isn't zoomed in. cs:s itself has no sniper crosshair");
 
         ImGui::Checkbox("csgo crosshair", &g_chCsgoEnable);
         if (g_chCsgoEnable)

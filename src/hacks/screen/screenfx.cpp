@@ -220,7 +220,7 @@ static DWORD s_endSceneTid = 0;   // thread our EndScene draw runs on
 static bool FxWantDepthPass()
 {
     return g_aoEnable || g_dofEnable || g_fbEnable || g_reflEnable || g_emphasizeEnable || g_showDepthEnable ||
-           ScreenFxPasses_WarpWanted();
+           ScreenFxPasses_WarpWanted() || ScreenFxPasses_FogWanted();
 }
 
 bool ScreenFx_View(FxViewSetup& out)
@@ -1277,6 +1277,7 @@ void ScreenFx_Frame(IDirect3DDevice9* dev, bool fromPostSlot)
     const bool wantRefl  = g_reflEnable;                          // unit D3
     const bool wantDv    = g_emphasizeEnable || g_showDepthEnable; // botox depth_view
     const bool wantWarp  = ScreenFxPasses_WarpWanted();            // depth distort + depth channel shift
+    const bool wantFog   = ScreenFxPasses_FogWanted();             // adaptive fog
     const bool wantPass  = FxWantDepthPass();
 
     if (!dev || (!wantPass && !wantProbe)) return;
@@ -1396,11 +1397,13 @@ void ScreenFx_Frame(IDirect3DDevice9* dev, bool fromPostSlot)
         {
             if (ScreenFx_View(view)) {
                 // botox do_post_screen_space_effects.cpp order: depth view, reflections, ao,
-                // depth warp, dof | web screen | true motion blur, bloom | flip world.
+                // adaptive fog, depth warp, dof | web screen | true motion blur, bloom | flip world.
                 // This is the half before the web screen; ScreenFx_FrameLate is the half after.
                 if (wantDv)   ScreenFxPasses_DepthView(dev, rt, desc, ScreenFx_DepthTexture(), view);
                 if (wantRefl) Reflections_Draw(dev, rt, desc, ScreenFx_DepthTexture(), view);
                 if (wantAo)   Ssao_Draw(dev, rt, desc, ScreenFx_DepthTexture(), view);
+                // under dof (dof blurs the fog) and under depth warp (fog warps with its frame)
+                if (wantFog)  ScreenFxPasses_AdaptiveFog(dev, rt, desc, ScreenFx_DepthTexture(), view);
                 // botox: before dof so the blur lands on the distorted frame (dof's focus still
                 // reads the undistorted depth there too)
                 if (wantWarp) ScreenFxPasses_Warp(dev, rt, desc, ScreenFx_DepthTexture(), view);

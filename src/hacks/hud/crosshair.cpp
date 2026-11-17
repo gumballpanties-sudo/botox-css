@@ -1920,21 +1920,6 @@ static void SniperCrosshair_Render()
     }
 }
 
-// botox custom_crosshair.cpp on_paint_traverse's hide rule (minus the scope check, which is
-// shared with the sniper crosshair below): never draw while holding an unscoped sniper weapon,
-// unless force_crosshair says otherwise. g_forceCrosshair is the CSS-adapted half of botox's
-// force_crosshair -- misc.cpp's half ALSO forced CSGO's weapon_debug_spread_show debug convar so
-// a crosshair-like overlay survived being actually zoomed in; grepped for that cvar across
-// source-sdk-2013 and resources/cssourcex64, no match -- CS:S has no such debug path, so that
-// half is dropped (see report). Being actually scoped still hides this crosshair either way,
-// same as botox's on_paint_traverse (its own force check never overrides is_scoped()).
-static bool ChCustomCrosshairHeld(int localIdx)
-{
-    if (g_forceCrosshair) return true;
-    const int wpn = CssBridge_ActiveWeapon(localIdx);
-    return !(wpn && CssBridge_IsSniperWeapon(wpn));
-}
-
 void RenderCrosshair()
 {
     KeepKillfeed_Tick();   // piggyback: no tick hook of its own, see killfeed.h
@@ -1942,23 +1927,30 @@ void RenderCrosshair()
     // asked twice, and IsLocalPlayerAlive walks GetLocalPlayerIndex + GetClientEntity
     // again right after. Ask once, and only ask about the player when we'd actually draw.
     const bool inGame = IsInGame();
-    const bool wanted = (g_chEnable || g_chCsgoEnable || g_sniperChEnable) && !g_eject;
-    ApplyNativeCrosshairState(wanted && inGame);
+    // custom + csgo crosshair replace the stock one, so they pin `crosshair 0`. The sniper
+    // crosshair must NOT: CS:S draws no sniper crosshair (weapon_csbase.cpp:908), so pinning
+    // for it only killed the stock crosshair on every other weapon.
+    const bool replaces = (g_chEnable || g_chCsgoEnable) && !g_eject;
+    const bool wanted   = replaces || (g_sniperChEnable && !g_eject);
+    ApplyNativeCrosshairState(replaces && inGame);
 
     if (!wanted || !inGame || !IsLocalPlayerAlive()) return;
 
-    const int localIdx = GetLocalPlayerIndex();
-    const bool scoped  = localIdx > 0 && CssBridge_IsScoped(localIdx);
+    const int  localIdx = GetLocalPlayerIndex();
+    const bool scoped   = localIdx > 0 && CssBridge_IsScoped(localIdx);
+    const int  wpn      = localIdx > 0 ? CssBridge_ActiveWeapon(localIdx) : 0;
+    const bool sniper   = wpn && CssBridge_IsSniperWeapon(wpn);
 
-    // botox: both crosshairs are hidden outright while actually scoped (is_scoped() check runs
-    // before either one's own logic in on_paint_traverse/sniper_crosshair).
-    if (g_chEnable && !scoped && ChCustomCrosshairHeld(localIdx)) RenderCustomCrosshair();
-    if (g_sniperChEnable && !scoped && localIdx > 0)
-    {
-        const int wpn = CssBridge_ActiveWeapon(localIdx);
-        if (wpn && CssBridge_IsSniperWeapon(wpn)) SniperCrosshair_Render();
-    }
-    if (g_chCsgoEnable)
+    // botox: every crosshair hides while actually scoped (is_scoped() runs first in
+    // custom_crosshair.cpp on_paint_traverse / indicators.cpp sniper_crosshair). On an unscoped
+    // sniper the custom one (custom_crosshair.cpp:708) and csgo's own (no sniper crosshair unless
+    // misc.cpp force_crosshair forces weapon_debug_spread_show 3) only draw with force on.
+    // CS:S has no weapon_debug_spread_show, so force gates our two instead.
+    const bool mainCh = !scoped && (!sniper || g_forceCrosshair);
+
+    if (g_chEnable && mainCh) RenderCustomCrosshair();
+    if (g_sniperChEnable && !scoped && sniper) SniperCrosshair_Render();
+    if (g_chCsgoEnable && mainCh)
     {
         if (g_chCsgoStyle <= 1) RenderCsgoPanorama(g_chCsgoStyle == 1);   // panorama reticle
         else                    RenderCsgoClassic(g_chCsgoStyle);         // vgui bars

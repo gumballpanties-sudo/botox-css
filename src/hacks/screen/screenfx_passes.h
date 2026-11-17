@@ -18,6 +18,13 @@ void ScreenFxPasses_DepthView(IDirect3DDevice9* dev, IDirect3DSurface9* target,
                               const D3DSURFACE_DESC& desc, IDirect3DTexture9* depth,
                               const FxViewSetup& view);
 
+// Adaptive fog (reshade OtisFX AdaptiveFog.fx, botox depth_view.cpp). Same draw point, after ao,
+// before depth distort + dof (dof blurs the fog). Shares depth view's frame copy.
+bool ScreenFxPasses_FogWanted();
+void ScreenFxPasses_AdaptiveFog(IDirect3DDevice9* dev, IDirect3DSurface9* target,
+                                const D3DSURFACE_DESC& desc, IDirect3DTexture9* depth,
+                                const FxViewSetup& view);
+
 // Depth distort (reshade Warp-FX on depth) + depth based channel shift. Same draw point as depth view,
 // last in the chain (after motion blur, before the gun). WarpTick = main thread, advances the anim clock.
 bool ScreenFxPasses_WarpWanted();

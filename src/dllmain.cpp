@@ -321,6 +321,15 @@ bool  g_emphasizeEnable    = false;
 float g_emphasizeAmount    = 1.f;     // botox m_emphasize_effect_factor
 bool  g_emphasizeSpherical = true;
 bool  g_showDepthEnable    = false;
+// reshade OtisFX AdaptiveFog.fx defaults (botox m_adaptive_fog_*)
+bool  g_adaptiveFogEnable         = false;
+float g_adaptiveFogColor[4]       = { 0.9f, 0.9f, 0.9f, 1.f };
+float g_adaptiveFogMax            = 0.8f;
+float g_adaptiveFogCurve          = 1.5f;
+float g_adaptiveFogStart          = 0.05f;
+float g_adaptiveFogBloomThreshold = 10.25f;
+float g_adaptiveFogBloomPower     = 10.f;
+float g_adaptiveFogBloomWidth     = 0.2f;
 // botox depth_view (emphasize = reshade Emphasize.fx, show depth = DisplayDepth.fx), botox defaults
 float g_emphasizeFocusDepth  = 0.f;
 float g_emphasizeFocusRange  = 0.f;

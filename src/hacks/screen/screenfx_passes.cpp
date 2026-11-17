@@ -1,5 +1,6 @@
 #include "screenfx_passes.h"
 #include "shaders/fx_depthview.h"  // k_fxDepthViewBytes -- compiled from fx_depthview.hlsl by fxc
+#include "shaders/fx_adaptivefog.h" // k_fxAdaptiveFogBytes -- compiled from fx_adaptivefog.hlsl by fxc
 #include "shaders/fx_warp.h"       // k_fxWarpPs / k_fxWarpWrite -- fx_warp_build.sh from fx_warp.hlsl
 #include "screenfx.h"      // shared quad -- emphasize/show depth draw through its vs_3_0
 #include "../movement/prediction.h"   // g_globalVars (warp clock, main thread)
@@ -16,10 +17,12 @@
 // (ScreenFx_Frame only resolved for ao/dof/fb) and the depth there reads far everywhere.
 
 static IDirect3DPixelShader9* s_psDepthView = nullptr;   // fx_depthview.hlsl, ps_3_0
-static IDirect3DTexture9*     s_dvFrameTex  = nullptr;   // depth view's own frame copy
+static IDirect3DPixelShader9* s_psFog       = nullptr;   // fx_adaptivefog.hlsl, ps_3_0
+static IDirect3DTexture9*     s_dvFrameTex  = nullptr;   // frame copy, depth view + adaptive fog
 static IDirect3DSurface9*     s_dvFrameSurf = nullptr;
 static int  s_dvW = 0, s_dvH = 0;
 static bool s_dvFailed = false;
+static bool s_fogFailed = false;
 
 static IDirect3DPixelShader9* s_wpPs[11][4]{};
 static IDirect3DPixelShader9* s_wpWrite[2]{};
@@ -52,6 +55,7 @@ void ScreenFxPasses_Destroy()
 {
     WarpRelease();
     if (s_psDepthView) { s_psDepthView->Release(); s_psDepthView = nullptr; }
+    if (s_psFog)       { s_psFog->Release();       s_psFog       = nullptr; }
     if (s_dvFrameSurf) { s_dvFrameSurf->Release(); s_dvFrameSurf = nullptr; }
     if (s_dvFrameTex)  { s_dvFrameTex->Release();  s_dvFrameTex  = nullptr; }
     s_dvW = s_dvH = 0;
@@ -64,31 +68,40 @@ static const D3DSAMPLERSTATETYPE k_sfxSamp[6] = {
 
 bool ScreenFxPasses_Frame(IDirect3DDevice9*, bool) { return false; }   // moved into colorcorrect.cpp
 
-// ==== emphasize + show depth (botox depth_view.cpp) ======================================
+// ==== emphasize + show depth + adaptive fog (botox depth_view.cpp) ========================
 // Render thread, from ScreenFx_Frame at the game's post slot, right after the depth resolve --
-// botox runs it first in its DoPostScreenSpaceEffects, ahead of reflections/ao/dof.
-void ScreenFxPasses_DepthView(IDirect3DDevice9* dev, IDirect3DSurface9* target,
-                              const D3DSURFACE_DESC& desc, IDirect3DTexture9* depth,
-                              const FxViewSetup& view)
+// botox runs depth view first in its DoPostScreenSpaceEffects, ahead of reflections/ao/dof, and
+// adaptive fog after ao, before depth warp + dof. Both share one frame copy + DvDraw.
+static bool DvShader(IDirect3DDevice9* dev, const BYTE* bytes, size_t size, IDirect3DPixelShader9*& ps,
+                     bool& failed, const char* name)
 {
-    if (!dev || !target || !depth || s_dvFailed || (!g_emphasizeEnable && !g_showDepthEnable)) return;
-    if (!ScreenFx_QuadReady(dev)) return;   // ps_3_0: the shared passthrough vs, not FF
-
-    // must be frame sized, else it is not the scene's depth
-    D3DSURFACE_DESC dd{};
-    if (FAILED(depth->GetLevelDesc(0, &dd)) || dd.Width != desc.Width || dd.Height != desc.Height) return;
-
-    if (!s_psDepthView) {
-        std::vector<DWORD> code((sizeof(k_fxDepthViewBytes) + 3) / 4);
-        memcpy(code.data(), k_fxDepthViewBytes, sizeof(k_fxDepthViewBytes));
-        if (FAILED(dev->CreatePixelShader(code.data(), &s_psDepthView)) || !s_psDepthView) {
-            s_psDepthView = nullptr;
-            s_dvFailed = true;
-            DebugLog("screenfx_passes: the card refused the depth view shader -- emphasize/show depth are off");
-            return;
-        }
-        DebugLog("screenfx_passes: depth view shader built");
+    if (ps) return true;
+    if (failed) return false;
+    std::vector<DWORD> code((size + 3) / 4);
+    memcpy(code.data(), bytes, size);
+    if (FAILED(dev->CreatePixelShader(code.data(), &ps)) || !ps) {
+        ps = nullptr;
+        failed = true;
+        DebugLog("screenfx_passes: the card refused the %s shader -- it is off", name);
+        return false;
     }
+    DebugLog("screenfx_passes: %s shader built", name);
+    return true;
+}
+
+// must be frame sized, else it is not the scene's depth
+static bool DvDepthFits(IDirect3DTexture9* depth, const D3DSURFACE_DESC& desc)
+{
+    D3DSURFACE_DESC dd{};
+    return SUCCEEDED(depth->GetLevelDesc(0, &dd)) && dd.Width == desc.Width && dd.Height == desc.Height;
+}
+
+// frame copy, botox's state save, one quad into target, restore. linearFrame = s1 bilinear (fog taps)
+static void DvDraw(IDirect3DDevice9* dev, IDirect3DSurface9* target, const D3DSURFACE_DESC& desc,
+                   IDirect3DTexture9* depth, IDirect3DPixelShader9* ps, const float (*c)[4], int nC, bool linearFrame)
+{
+    constexpr int kMaxC = 9;
+    if (nC > kMaxC) return;
     if (!s_dvFrameTex || s_dvW != (int)desc.Width || s_dvH != (int)desc.Height) {
         if (s_dvFrameSurf) { s_dvFrameSurf->Release(); s_dvFrameSurf = nullptr; }
         if (s_dvFrameTex)  { s_dvFrameTex->Release();  s_dvFrameTex  = nullptr; }
@@ -122,7 +135,7 @@ void ScreenFxPasses_DepthView(IDirect3DDevice9* dev, IDirect3DSurface9* target,
     static_assert(sizeof(k_rsVal) / sizeof(k_rsVal[0]) == sizeof(k_rs) / sizeof(k_rs[0]), "state list");
 
     DWORD oldRs[kRs]{}, oldSamp[2][6]{}, oldFvf = 0;
-    float oldC[9][4]{};
+    float oldC[kMaxC][4]{};
     IDirect3DSurface9* oldDs = nullptr;
     IDirect3DPixelShader9* oldPs = nullptr;
     IDirect3DVertexShader9* oldVs = nullptr;
@@ -146,46 +159,32 @@ void ScreenFxPasses_DepthView(IDirect3DDevice9* dev, IDirect3DSurface9* target,
     dev->GetStreamSource(0, &oldStream, &oldOff, &oldStride);
     dev->GetIndices(&oldIdx);
     dev->GetViewport(&oldVp);
-    dev->GetPixelShaderConstantF(0, oldC[0], 9);
+    dev->GetPixelShaderConstantF(0, oldC[0], nC);
 
-    // ---- draw, constants laid out exactly as botox's
-    const float W = (float)desc.Width, H = (float)desc.Height;
-    const float sx = g_showDepthScaleX > 0.001f ? g_showDepthScaleX : 0.001f;
-    const float sy = g_showDepthScaleY > 0.001f ? g_showDepthScaleY : 0.001f;
-    const float c[9][4] = {
-        { g_emphasizeEnable ? 1.f : 0.f, g_showDepthEnable ? 1.f : 0.f, 1.f / W, 1.f / H },
-        { g_emphasizeFocusDepth, g_emphasizeFocusRange, g_emphasizeFocusEdge, g_emphasizeSpherical ? 1.f : 0.f },
-        { (float)g_emphasizeSphereFov, g_emphasizeSphereX, g_emphasizeSphereY, g_emphasizeAmount },
-        { g_emphasizeBlendColor[0], g_emphasizeBlendColor[1], g_emphasizeBlendColor[2], g_emphasizeBlendFactor },
-        { (float)g_showDepthType, g_showDepthBlend ? 1.f : 0.f, g_showDepthLive ? 1.f : 0.f, 0.f },
-        { g_showDepthUpsideDown ? 1.f : 0.f, g_showDepthReversed ? 1.f : 0.f, g_showDepthLog ? 1.f : 0.f, g_showDepthFarPlane },
-        { sx, sy, (float)g_showDepthOffsetX, (float)g_showDepthOffsetY },
-        { g_showDepthMultiplier, W, H, 0.f },
-        { view.zNear, view.zFar, 0.f, 0.f },   // c8: lin() unprojects with the real z range
-    };
-
+    // ---- draw
     dev->SetDepthStencilSurface(nullptr);
     for (int i = 0; i < kRs; ++i) dev->SetRenderState(k_rs[i], k_rsVal[i]);
     for (int u = 0; u < 2; ++u) {
+        const DWORD filter = (linearFrame && u == 1) ? D3DTEXF_LINEAR : D3DTEXF_POINT;
         dev->SetSamplerState(u, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
         dev->SetSamplerState(u, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
         dev->SetSamplerState(u, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
         dev->SetSamplerState(u, D3DSAMP_SRGBTEXTURE, 0);
-        dev->SetSamplerState(u, D3DSAMP_MINFILTER, D3DTEXF_POINT);
-        dev->SetSamplerState(u, D3DSAMP_MAGFILTER, D3DTEXF_POINT);
+        dev->SetSamplerState(u, D3DSAMP_MINFILTER, filter);
+        dev->SetSamplerState(u, D3DSAMP_MAGFILTER, filter);
     }
-    dev->SetPixelShaderConstantF(0, c[0], 9);
+    dev->SetPixelShaderConstantF(0, c[0], nC);
     dev->SetTexture(0, depth);
     dev->SetTexture(1, s_dvFrameTex);
     dev->SetRenderTarget(0, target);
     const D3DVIEWPORT9 vp{ 0, 0, desc.Width, desc.Height, 0.f, 1.f };
     dev->SetViewport(&vp);
-    dev->SetPixelShader(s_psDepthView);
+    dev->SetPixelShader(ps);
     ScreenFx_BindQuad(dev);
     ScreenFx_DrawQuad(dev, (int)desc.Width, (int)desc.Height);
 
     // ---- restore
-    dev->SetPixelShaderConstantF(0, oldC[0], 9);
+    dev->SetPixelShaderConstantF(0, oldC[0], nC);
     dev->SetPixelShader(oldPs);
     dev->SetVertexShader(oldVs);
     if (oldDecl) dev->SetVertexDeclaration(oldDecl); else dev->SetFVF(oldFvf);
@@ -202,12 +201,74 @@ void ScreenFxPasses_DepthView(IDirect3DDevice9* dev, IDirect3DSurface9* target,
     for (IUnknown* held : { (IUnknown*)oldDs, (IUnknown*)oldPs, (IUnknown*)oldVs, (IUnknown*)oldDecl,
                             (IUnknown*)oldTex[0], (IUnknown*)oldTex[1], (IUnknown*)oldStream, (IUnknown*)oldIdx })
         if (held) held->Release();
+}
+
+void ScreenFxPasses_DepthView(IDirect3DDevice9* dev, IDirect3DSurface9* target,
+                              const D3DSURFACE_DESC& desc, IDirect3DTexture9* depth,
+                              const FxViewSetup& view)
+{
+    if (!dev || !target || !depth || s_dvFailed || (!g_emphasizeEnable && !g_showDepthEnable)) return;
+    if (!ScreenFx_QuadReady(dev)) return;   // ps_3_0: the shared passthrough vs, not FF
+    if (!DvDepthFits(depth, desc)) return;
+    if (!DvShader(dev, k_fxDepthViewBytes, sizeof(k_fxDepthViewBytes), s_psDepthView, s_dvFailed, "depth view")) return;
+
+    // constants laid out exactly as botox's
+    const float W = (float)desc.Width, H = (float)desc.Height;
+    const float sx = g_showDepthScaleX > 0.001f ? g_showDepthScaleX : 0.001f;
+    const float sy = g_showDepthScaleY > 0.001f ? g_showDepthScaleY : 0.001f;
+    const float c[9][4] = {
+        { g_emphasizeEnable ? 1.f : 0.f, g_showDepthEnable ? 1.f : 0.f, 1.f / W, 1.f / H },
+        { g_emphasizeFocusDepth, g_emphasizeFocusRange, g_emphasizeFocusEdge, g_emphasizeSpherical ? 1.f : 0.f },
+        { (float)g_emphasizeSphereFov, g_emphasizeSphereX, g_emphasizeSphereY, g_emphasizeAmount },
+        { g_emphasizeBlendColor[0], g_emphasizeBlendColor[1], g_emphasizeBlendColor[2], g_emphasizeBlendFactor },
+        { (float)g_showDepthType, g_showDepthBlend ? 1.f : 0.f, g_showDepthLive ? 1.f : 0.f, 0.f },
+        { g_showDepthUpsideDown ? 1.f : 0.f, g_showDepthReversed ? 1.f : 0.f, g_showDepthLog ? 1.f : 0.f, g_showDepthFarPlane },
+        { sx, sy, (float)g_showDepthOffsetX, (float)g_showDepthOffsetY },
+        { g_showDepthMultiplier, W, H, 0.f },
+        { view.zNear, view.zFar, 0.f, 0.f },   // c8: lin() unprojects with the real z range
+    };
+    DvDraw(dev, target, desc, depth, s_psDepthView, c, 9, false);
 
     static bool logged = false;
     if (!logged) {
         logged = true;
         DebugLog("screenfx_passes: depth view drew %ux%u (emphasize=%d show depth=%d) at the post slot",
                  (unsigned)desc.Width, (unsigned)desc.Height, (int)g_emphasizeEnable, (int)g_showDepthEnable);
+    }
+}
+
+// ==== adaptive fog (reshade OtisFX AdaptiveFog.fx, botox depth_view.cpp k_fog_shader) =======
+// max 0 or curve 0 = no fog on any pixel: no pass at all
+bool ScreenFxPasses_FogWanted() { return g_adaptiveFogEnable && g_adaptiveFogMax > 0.f && g_adaptiveFogCurve > 0.f; }
+
+void ScreenFxPasses_AdaptiveFog(IDirect3DDevice9* dev, IDirect3DSurface9* target,
+                                const D3DSURFACE_DESC& desc, IDirect3DTexture9* depth,
+                                const FxViewSetup& view)
+{
+    if (!dev || !target || !depth || s_fogFailed || !ScreenFxPasses_FogWanted()) return;
+    if (!(view.zNear > 0.f && view.zFar > view.zNear)) return;   // lin() divides by the z range
+    if (!ScreenFx_QuadReady(dev)) return;
+    if (!DvDepthFits(depth, desc)) return;
+    if (!DvShader(dev, k_fxAdaptiveFogBytes, sizeof(k_fxAdaptiveFogBytes), s_psFog, s_fogFailed, "adaptive fog")) return;
+
+    // Otis: blur / (25 - (power - threshold * 5)) * (power + 4), folded to one gain
+    float divisor = 25.f - (g_adaptiveFogBloomPower - g_adaptiveFogBloomThreshold * 5.f);
+    if (fabsf(divisor) < 1e-4f) divisor = 1e-4f;
+
+    // layout in fx_adaptivefog.hlsl
+    const float c[4][4] = {
+        { 1.f / (float)desc.Width, 1.f / (float)desc.Height, g_adaptiveFogBloomWidth, 0.f },
+        { g_adaptiveFogColor[0], g_adaptiveFogColor[1], g_adaptiveFogColor[2], g_adaptiveFogMax },
+        { g_adaptiveFogCurve, g_adaptiveFogStart, (g_adaptiveFogBloomPower + 4.f) / divisor, 0.f },
+        { view.zNear, view.zFar, 0.f, 0.f },
+    };
+    DvDraw(dev, target, desc, depth, s_psFog, c, 4, true);
+
+    static bool logged = false;
+    if (!logged) {
+        logged = true;
+        DebugLog("screenfx_passes: adaptive fog drew %ux%u at the post slot (z %.1f..%.1f)",
+                 (unsigned)desc.Width, (unsigned)desc.Height, view.zNear, view.zFar);
     }
 }
 
