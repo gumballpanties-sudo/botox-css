@@ -9223,7 +9223,7 @@ const BYTE k_fxChamPs24[] =
 };
 
 struct FxChamPs { const BYTE* bytes; unsigned size; };
-static const FxChamPs k_fxChamPs[25] = {
+static const FxChamPs k_fxChamPs[26] = {
     { nullptr, 0 },
     { k_fxChamPs1, sizeof(k_fxChamPs1) },
     { k_fxChamPs2, sizeof(k_fxChamPs2) },
@@ -9249,4 +9249,5 @@ static const FxChamPs k_fxChamPs[25] = {
     { k_fxChamPs22, sizeof(k_fxChamPs22) },
     { k_fxChamPs23, sizeof(k_fxChamPs23) },
     { k_fxChamPs24, sizeof(k_fxChamPs24) },
+    { nullptr, 0 },
 };

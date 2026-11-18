@@ -459,17 +459,23 @@ void UnitC_Menu_visuals_chams()
 
     ImGui::EndDisabled();
 
-    bool two_tone_used = false;
+    bool two_tone_used = false, glass_used = false;
     for (const char* cfg : { g_chamsVisibleCfg, g_chamsOccludedCfg, g_chamsSoundCfg, g_chamsTeamVisibleCfg, g_chamsTeamOccludedCfg,
                              g_chamsWeaponCfg }) {
         ChamsLayers::List l;
         ChamsLayers::Parse(cfg, l);
         two_tone_used |= ChamsLayers::IndexOf(l, ChamsLayers::TwoTone) >= 0;
+        glass_used |= ChamsLayers::IndexOf(l, ChamsLayers::Glass) >= 0;
     }
 
     if (two_tone_used) {
         ImGui::SliderFloat("two tone threshold", &g_chamsTwoToneThreshold, 0.f, 1.f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
         ImGui::SliderFloat("two tone edge", &g_chamsTwoToneEdge, 0.f, 0.5f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+    }
+
+    if (glass_used) {
+        ImGui::SliderFloat("glass refraction", &g_chamsGlassRefract, 0.f, 64.f, "%.1f", ImGuiSliderFlags_AlwaysClamp);
+        ImGui::SliderFloat("glass bump", &g_chamsGlassBump, 0.f, 3.f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
     }
 }
 

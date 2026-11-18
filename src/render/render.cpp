@@ -37,6 +37,7 @@
 #include "../hacks/visuals/rear_mirror.h"   // RearMirror_Draw / RearMirror_DropTexture
 #include "../hacks/aim/esp_weapon_icons.h"   // ESPC_WPNICON resolve (plain globals.h types, aim TU safe)
 #include "../hacks/visuals/player_stencil.h"  // PlayerStencil_ReleaseTargets in h_Reset
+#include "../hacks/visuals/lsd_chams.h"       // GlassChams_ReleaseTargets in h_Reset
 #include "../hacks/menu/fonts.h"          // fonts tab: indicator face picked at runtime
 #include "../dependencies/imgui/freetype/imgui_freetype.h"
 #include "../dependencies/imgui/imgui_internal.h"
@@ -2624,6 +2625,7 @@ HRESULT __stdcall h_Reset(IDirect3DDevice9* dev, D3DPRESENT_PARAMETERS* pp) {
     Indicators_ReleaseTextures();         // mitosis morph texture; rebuilt on the next split
     Avatar_ReleaseAll();               // unit E5: avatar textures are DEFAULT-pool too
     PlayerStencil_ReleaseTargets();    // esp unit: player stencil mask/blur targets, DEFAULT-pool
+    GlassChams_ReleaseTargets();       // glass chams rt copies, DEFAULT-pool, remade at the next glass layer
     EspPreview::DropTexture();         // esp preview: its target is remade, the d3d texture with it
     RearMirror_DropTexture();          // rear view mirror: same
     EspWeaponIcon_ReleaseAll();        // esp weapon glyphs: DEFAULT-pool, a live one fails the Reset; recached on next draw

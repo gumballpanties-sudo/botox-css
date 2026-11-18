@@ -111,6 +111,8 @@
 "chamsBacktrackType",
 "chamsBacktrackXqz",
 "chamsEnable",
+"chamsGlassBump",
+"chamsGlassRefract",
 "chamsLocalEnable",
 "chamsOccluded",
 "chamsRagdolls",

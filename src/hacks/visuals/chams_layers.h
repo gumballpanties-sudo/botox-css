@@ -16,8 +16,9 @@ namespace ChamsLayers
 		// TwoTone = no material: model's own materials, DIP swaps in the two tone shader (visuals/lsd_chams.cpp)
 		// Fresnel..Sky = Atlas-TF2 chams (Neon = its "lsd"), appended so old configs keep their indices
 		// Grid = botox 11-12: bind pose grid lines that ride the model
+		// Glass = botox 11-18, no material like two tone: own materials (normal map), DIP refracts a copy of the bound rt
 		Original = 0, Flat, Shaded, Wireframe, Glow, Metallic, Pearlescent, Ambient, Gold, Damascus, Crystal, Wet, Lsd, TwoTone,
-		Fresnel, Lava, Pearl, Bubble, Neon, Network, Soap, Aurora, Aquarium, Sky, Grid,
+		Fresnel, Lava, Pearl, Bubble, Neon, Network, Soap, Aurora, Aquarium, Sky, Grid, Glass,
 		Count
 	};
 	inline constexpr int kMaxLayers = 8;      // botox chams_max_layers
@@ -25,10 +26,10 @@ namespace ChamsLayers
 
 	inline const char* const kNames[Count] = { "original", "flat", "shaded", "wireframe", "glow", "metallic",
 	                                           "pearlescent", "ambient", "gold", "damascus", "crystal", "wet", "lsd", "two tone",
-	                                           "fresnel", "lava", "pearl", "bubble", "neon", "network", "soap", "aurora", "aquarium", "sky", "grid" };
+	                                           "fresnel", "lava", "pearl", "bubble", "neon", "network", "soap", "aurora", "aquarium", "sky", "grid", "glass" };
 
 	// drawn by the shader chams DIP swap (lsd_chams.h ShaderChams_*), carrier material + fx_cham_ps[index]
-	inline bool IsShader(int mat) { return mat > Original && mat < Count && mat != Lsd && mat != TwoTone; }
+	inline bool IsShader(int mat) { return mat > Original && mat < Count && mat != Lsd && mat != TwoTone && mat != Glass; }
 
 	struct List
 	{

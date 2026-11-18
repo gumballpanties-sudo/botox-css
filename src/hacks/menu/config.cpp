@@ -817,6 +817,8 @@ static const CfgEntry kEntries[] = {
     { "chamsSoundMaxDistance",  CfgEntry::FLOAT,  &g_chamsSoundMaxDistance, 0 },
     { "chamsTwoToneThreshold",  CfgEntry::FLOAT,  &g_chamsTwoToneThreshold, 0 },
     { "chamsTwoToneEdge",       CfgEntry::FLOAT,  &g_chamsTwoToneEdge, 0 },
+    { "chamsGlassRefract",      CfgEntry::FLOAT,  &g_chamsGlassRefract, 0 },
+    { "chamsGlassBump",         CfgEntry::FLOAT,  &g_chamsGlassBump, 0 },
     { "chamsVisible",          CfgEntry::STR,    g_chamsVisibleCfg, sizeof(g_chamsVisibleCfg) },
     { "chamsOccluded",          CfgEntry::STR,    g_chamsOccludedCfg, sizeof(g_chamsOccludedCfg) },
     { "chamsSound",             CfgEntry::STR,    g_chamsSoundCfg, sizeof(g_chamsSoundCfg) },

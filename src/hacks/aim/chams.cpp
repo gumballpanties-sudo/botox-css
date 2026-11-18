@@ -44,6 +44,8 @@ extern float g_chamsSoundMinVolume;
 extern float g_chamsSoundMaxDistance;
 extern float g_chamsTwoToneThreshold;    // botox m_chams_two_tone_threshold: camera light, cos of facing angle
 extern float g_chamsTwoToneEdge;         // botox m_chams_two_tone_edge: cut softness
+extern float g_chamsGlassRefract;        // botox m_chams_glass_refract: refraction depth, world units
+extern float g_chamsGlassBump;           // botox m_chams_glass_bump: model normal map strength, 0 = smooth
 extern char  g_chamsVisibleCfg[ChamsLayers::kCfgLen];
 extern char  g_chamsOccludedCfg[ChamsLayers::kCfgLen];
 extern char  g_chamsSoundCfg[ChamsLayers::kCfgLen];
@@ -221,7 +223,7 @@ namespace
 			{
 				int n = 0;
 				for (auto& v : s_mats) for (auto& m : v) n += m.pMat != nullptr;
-				DebugLog("chams: materials built (%d/%d variants)", n, 2 * (ChamsLayers::Count - 2));   // original + two tone have none
+				DebugLog("chams: materials built (%d/%d variants)", n, 2 * (ChamsLayers::Count - 3));   // original + two tone + glass have none
 				s_loggedBuilt = true;
 			}
 		}
@@ -281,6 +283,20 @@ namespace
 				TwoToneChams_Begin(light, dark, g_chamsTwoToneThreshold, g_chamsTwoToneEdge, ignorez);
 				ctx.Draw(pBones);
 				TwoToneChams_End();
+				bDrew = true;
+				continue;
+			}
+			if (index == ChamsLayers::Glass)
+			{
+				const float tint[4] = { c[0], c[1], c[2], c[3] * alphaScale };
+				if (tint[3] <= 0.f) continue;
+				// own materials = engine binds the normal map; blend < 1 = engine draws translucent (two tone)
+				static const float kWhite[4] = { 1.f, 1.f, 1.f, 1.f };
+				ForceMaterial(nullptr);
+				SetModulation(kWhite, tint[3] < 1.f ? (tint[3] < 0.99f ? tint[3] : 0.99f) : 1.f);
+				GlassChams_Begin(tint, g_chamsGlassRefract, g_chamsGlassBump, ignorez);
+				ctx.Draw(pBones);
+				GlassChams_End();
 				bDrew = true;
 				continue;
 			}

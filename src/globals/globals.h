@@ -977,6 +977,8 @@ extern float g_chamsSoundMinVolume;
 extern float g_chamsSoundMaxDistance;
 extern float g_chamsTwoToneThreshold;   // botox two tone: camera light, cut = cos of facing angle
 extern float g_chamsTwoToneEdge;        // botox two tone: cut softness
+extern float g_chamsGlassRefract;       // botox glass: refraction depth, world units (screen shift shrinks with distance, flat inside 100)
+extern float g_chamsGlassBump;          // botox glass: model normal map strength, 0 = smooth
 extern char  g_chamsVisibleCfg[160];
 extern char  g_chamsOccludedCfg[160];
 extern char  g_chamsSoundCfg[160];

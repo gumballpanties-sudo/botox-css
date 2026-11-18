@@ -28,6 +28,14 @@ void ShaderChams_End();
 void TwoToneChams_Begin(const float light[4], const float dark[4], float threshold, float edge, bool ignorez);
 void TwoToneChams_End();
 
+// botox hacks/visuals/glass_chams.{h,cpp}: the "glass" layer draws the model's OWN materials like two tone (normal map
+// stays bound); while armed the DIP detour copies the bound rt once per layer and swaps in fx_glass_* (that copy refracted
+// by the normal mapped normal). tint 0..1 display, alpha pre-scaled; refract = world units, bump = normal map strength.
+// ReleaseTargets: the rt copies are DEFAULT pool, dropped before a device Reset.
+void GlassChams_Begin(const float tint[4], float refract, float bump, bool ignorez);
+void GlassChams_End();
+void GlassChams_ReleaseTargets();
+
 // botox hacks/visuals/weapon_sheen.{h,cpp} (1:1, round-5): a THIRD DIP layer, same shape as lsd/
 // two-tone above -- a forced-material-override additive-black carrier draws one extra pass of the
 // local viewmodel weapon while armed, and the DIP detour swaps in the real envmap-cubemap +
