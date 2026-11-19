@@ -130,6 +130,7 @@ void UnitB_Menu_movement_indicators()
         ImGui::OptionPopup("velocity graph settings", [&]() {
             ImGui::ColorRow("line color##velocity graph", g_vgColor);
             ImGui::SliderFloat("thickness##velocity graph", &g_vgThickness, 0.5f, 6.f, "%.1f");
+            ImGui::SliderInt("smoothing##velocity graph", &g_vgSmooth, 0, 32, g_vgSmooth <= 0 ? "off" : "%d ticks");
 
             ImGui::Checkbox("gain colors##velocity graph", &g_vgGainColors);
             if (g_vgGainColors)
@@ -141,7 +142,10 @@ void UnitB_Menu_movement_indicators()
 
             ImGui::Checkbox("fill##velocity graph", &g_vgFill);
             if (g_vgFill)
+            {
                 ImGui::ColorRow("fill color##velocity graph", g_vgFillColor);
+                ImGui::Checkbox("height gradient##velocity graph", &g_vgFillHeight);
+            }
 
             ImGui::Checkbox("fade sides##velocity graph", &g_vgFadeSides);
             if (g_vgFadeSides)

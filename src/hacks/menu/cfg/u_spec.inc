@@ -51,5 +51,6 @@
     { "specGamesenseBar",      CfgEntry::BOOL,   &g_specGamesenseBar, 0 },
     { "specSkebobBg",          CfgEntry::BOOL,   &g_specSkebobBg, 0 },
     { "specSkebobTitle",       CfgEntry::BOOL,   &g_specSkebobTitle, 0 },
+    { "specHotwheelsGap",      CfgEntry::FLOAT,  &g_specHotwheelsGap, 0 },
     { "specCv2X",              CfgEntry::FLOAT,  &g_specCv2X, 0 },
     { "specCv2Y",              CfgEntry::FLOAT,  &g_specCv2Y, 0 },

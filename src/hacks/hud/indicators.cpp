@@ -2498,11 +2498,18 @@ static void velocity_graph(const MvInd_t& s, const bool on_ground, const bool al
     };
     std::vector<graph_pt_t> pts;
     pts.reserve(s_graph.size());
-    const int count = (int)s_graph.size();
+    const int count  = (int)s_graph.size();
+    const int smooth = std::clamp(g_vgSmooth, 0, 64);
+    std::vector<double> sum(count + 1, 0.0);
+    for (int i = 0; i < count; ++i)
+        sum[i + 1] = sum[i] + s_graph[i].m_speed;
     for (int i = 0; i < count; ++i) {
-        const float x = left + width - (float)(count - 1 - i) * step;
-        const float y = base_y - std::min(s_graph[i].m_speed / top, 1.f) * height;
-        pts.push_back({ ImVec2(x, y), edge_alpha(x), (int)std::round(s_graph[i].m_speed) });
+        // trailing mean: drawn points never shift while the graph scrolls
+        const int   lo    = std::max(i - smooth, 0);
+        const float speed = (float)((sum[i + 1] - sum[lo]) / (i + 1 - lo));
+        const float x     = left + width - (float)(count - 1 - i) * step;
+        const float y     = base_y - std::min(speed / top, 1.f) * height;
+        pts.push_back({ ImVec2(x, y), edge_alpha(x), (int)std::round(speed) });
     }
 
     const ImVec4 line(g_vgColor[0], g_vgColor[1], g_vgColor[2], g_vgColor[3]);
@@ -2520,7 +2527,10 @@ static void velocity_graph(const MvInd_t& s, const bool on_ground, const bool al
     };
 
     if (fill_on) {
-        const ImVec2 uv = ImGui::GetFontTexUvWhitePixel();
+        const ImVec2 uv    = ImGui::GetFontTexUvWhitePixel();
+        const auto   top_a = [&](const graph_pt_t& p) {
+            return g_vgFillHeight ? p.m_a * std::clamp((base_y - p.m_at.y) / height, 0.f, 1.f) : p.m_a;
+        };
         for (size_t i = 1; i < pts.size(); ++i) {
             const graph_pt_t& a = pts[i - 1];
             const graph_pt_t& b = pts[i];
@@ -2533,8 +2543,8 @@ static void velocity_graph(const MvInd_t& s, const bool on_ground, const bool al
             dl->PrimWriteIdx(idx);
             dl->PrimWriteIdx((ImDrawIdx)(idx + 2));
             dl->PrimWriteIdx((ImDrawIdx)(idx + 3));
-            dl->PrimWriteVtx(a.m_at, uv, with_a(fill, a.m_a));
-            dl->PrimWriteVtx(b.m_at, uv, with_a(fill, b.m_a));
+            dl->PrimWriteVtx(a.m_at, uv, with_a(fill, top_a(a)));
+            dl->PrimWriteVtx(b.m_at, uv, with_a(fill, top_a(b)));
             dl->PrimWriteVtx(ImVec2(b.m_at.x, base_y), uv, with_a(fill, 0.f));
             dl->PrimWriteVtx(ImVec2(a.m_at.x, base_y), uv, with_a(fill, 0.f));
         }
@@ -2561,7 +2571,7 @@ static void velocity_graph(const MvInd_t& s, const bool on_ground, const bool al
         if (!s_graph[i].m_take_off || pts[i].m_a <= 0.f)
             continue;
         char label[16];
-        std::snprintf(label, sizeof(label), "%d", pts[i].m_speed);
+        std::snprintf(label, sizeof(label), "%d", (int)std::round(s_graph[i].m_speed));
         const ImVec2 size = font->CalcTextSizeA(fs, FLT_MAX, 0.f, label);
         ImVec4 c = text;
         c.w *= pts[i].m_a;

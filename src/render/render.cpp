@@ -2116,6 +2116,13 @@ static void BuildImGuiFrame()
         s_popCount = 0;
         Menu_DropPopupGhosts();                    // ghosts point at the old twin texture
     }
+    // Cover art + avatar uploads release the old texture. Same safe point as the atlas above:
+    // the lists below are rebuilt right after, so no list ever replays a freed pointer. From
+    // h_Present (old spot) the swap landed between this build and the overlay replay ->
+    // SetTexture(freed) in d3d9 on every song skip. Render thread: g_imguiInit (set in
+    // h_Present after s_presentTid) gates every caller onto the Present thread.
+    MediaPlayer_Tick(g_d3dDev);
+    Avatar_Tick(g_d3dDev);   // unit E5: uploads any avatar pixels Avatar_Pump fetched on the game thread
 
     ImGui_ImplDX9_NewFrame();
     ImGui_ImplWin32_NewFrame();
@@ -2565,10 +2572,7 @@ chain:
         UpdateFPS();
         // Rain_Tick: NOT here. Present is the render thread under mat_queue_mode 2, and it
         // creates/frees a client entity -- fsn.cpp h_FrameStageNotify(5) runs it instead.
-        // Cover art upload. Here and not in the frame build: the build can run from the vgui
-        // pass on the MAIN thread, and CreateTexture/LockRect there would race Present.
-        MediaPlayer_Tick(dev);
-        Avatar_Tick(dev);   // unit E5: uploads any avatar pixels Avatar_Pump fetched on the game thread
+        // MediaPlayer_Tick / Avatar_Tick: NOT here either, see BuildImGuiFrame.
 
         const bool psWinOpen = s_psPointWin >= 0 || Recorder_EditorOpen();   // recorder clip editor = same input handoff
         const bool menuUp    = g_showMenu || psWinOpen;

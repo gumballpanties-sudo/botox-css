@@ -111,6 +111,7 @@ inline int   g_vgOffsetX     = 0;
 inline int   g_vgLength      = 200;
 inline float g_vgMax         = 0.f;   // 0 = auto
 inline float g_vgThickness   = 1.5f;
+inline int   g_vgSmooth      = 0;     // trailing mean ticks, 0 = off
 inline float g_vgColor[4]     = { 1.f, 1.f, 1.f, 1.f };
 inline bool  g_vgGainColors  = false;
 inline float g_vgColorGain[4] = {  30 / 255.f, 1.f, 109 / 255.f, 1.f };
@@ -119,6 +120,7 @@ inline bool  g_vgFadeSides   = true;
 inline float g_vgFade        = 0.2f;
 inline bool  g_vgFill        = false;
 inline float g_vgFillColor[4] = { 1.f, 1.f, 1.f, 40 / 255.f };
+inline bool  g_vgFillHeight  = false;
 inline bool  g_vgJumpSpeeds  = true;
 inline float g_vgTextColor[4] = { 1.f, 1.f, 1.f, 1.f };
 inline float g_vgTextScale   = 0.75f;

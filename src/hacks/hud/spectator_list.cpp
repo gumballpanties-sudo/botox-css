@@ -2399,6 +2399,72 @@ static void DrawKamidere(ImDrawList* dl, ImGuiIO& io)
     dl->PopClipRect();
 }
 
+// style 33: hotwheels v1 (hwsapeclist recreation) -- "SPECTATORS" header box, gap, rows box. bg 18 a230,
+// 10 outer / 70 inner rect, 2 px accent top line, 11 px text with 4 dir black a220 outline, local
+// watcher name = accent. Out of game = 2 placeholder rows.
+static void DrawHotwheelsV1(ImDrawList* dl)
+{
+    ImFont* font = Font(g_menuBold);
+    const bool showTarget = g_specShowTarget;
+    std::vector<SpecEntry> entries;
+    if (IsInGame()) {
+        Collect(entries, true);
+        const int localIdx = GetLocalPlayerIndex();
+        entries.erase(std::remove_if(entries.begin(), entries.end(), [&](const SpecEntry& e) {
+            return e.index == localIdx || (!showTarget && !e.watchingLocal); }), entries.end());
+        SortByIndex(entries);
+    } else if (g_specAlwaysShow) {
+        entries.push_back({ "Player1 -> Player2" });
+        entries.push_back({ "Player3 -> Player4" });
+    }
+    if (entries.empty() && !g_specAlwaysShow) return;
+
+    constexpr float px = 11.f, headerH = 20.f, rowH = 15.f, padX = 5.f, padY = 3.f;
+    constexpr const char* title = "SPECTATORS"; constexpr const char* arrow = " -> ";
+    const auto tw = [&](const std::string& s) { return font->CalcTextSizeA(px, FLT_MAX, 0.f, s.c_str()).x; };
+    const bool avatars = g_specAvatar;
+    const float avatarW = avatars ? px + 3.f : 0.f, gap = g_specHotwheelsGap;
+    float widest = tw(title) + 16.f;
+    for (const SpecEntry& e : entries)
+        widest = ImMax(widest, avatarW + tw(showTarget && !e.target.empty() ? e.name + arrow + e.target : e.name) + 10.f);
+    const float boxW = ImMax(160.f, widest);
+    const float entriesH = entries.empty() ? 0.f : padY * 2.f + (float)entries.size() * rowH;
+    float x, y; Place(boxW, headerH + (entries.empty() ? 0.f : gap + entriesH), x, y);
+
+    const ImU32 accent = ImGui::GetColorU32(ImGuiCol_Accent), white = IM_COL32(255, 255, 255, 255);
+    const auto box = [&](float top, float h) {
+        dl->AddRectFilled(ImVec2(x, top), ImVec2(x + boxW, top + h), IM_COL32(18, 18, 18, 230));
+        dl->AddRect(ImVec2(x, top), ImVec2(x + boxW, top + h), IM_COL32(10, 10, 10, 255));
+        dl->AddRect(ImVec2(x + 1.f, top + 1.f), ImVec2(x + boxW - 1.f, top + h - 1.f), IM_COL32(70, 70, 70, 255));
+    };
+    const auto text = [&](ImVec2 p, ImU32 c, const char* s) {
+        constexpr ImVec2 off[4] = { {-1,0},{1,0},{0,-1},{0,1} };
+        for (auto& o : off) dl->AddText(font, px, ImVec2(p.x + o.x, p.y + o.y), IM_COL32(0, 0, 0, 220), s);
+        dl->AddText(font, px, p, c, s);
+    };
+
+    box(y, headerH);
+    dl->AddLine(ImVec2(x, y), ImVec2(x + boxW, y), accent, 2.f);
+    text(ImVec2(x + (boxW - tw(title)) * 0.5f, y + (headerH - px) * 0.5f), white, title);
+    if (entries.empty()) return;
+
+    const float ey = y + headerH + gap;
+    box(ey, entriesH);
+    for (size_t i = 0; i < entries.size(); ++i) {
+        const SpecEntry& e = entries[i];
+        const float rowY = ey + padY + (float)i * rowH;
+        float cx = x + padX;
+        if (avatars) {
+            const ImVec2 amn(cx, rowY), amx(cx + px, rowY + px);
+            if (ImTextureID t = Avatar(e.sid)) dl->AddImage(t, amn, amx);
+            else dl->AddRectFilled(amn, amx, IM_COL32(36, 36, 36, 255));
+            cx += avatarW;
+        }
+        text(ImVec2(cx, rowY), e.watchingLocal ? accent : white, e.name.c_str());
+        if (showTarget && !e.target.empty()) text(ImVec2(cx + tw(e.name), rowY), white, (arrow + e.target).c_str());
+    }
+}
+
 // ==== drag + dispatch ==========================================================================
 // Styles that hardcode their x/y instead of calling Place(); SpecDrag shifts the vertices they added
 // (none of them push a clip rect or a BlurRect).
@@ -2505,6 +2571,7 @@ static void DrawStyle(ImDrawList* dl, ImGuiIO& io)
     case 30: DrawHoweweware(dl);        break;
     case 31: DrawGamesense(dl);         break;
     case 32: DrawKamidere(dl, io);      break;
+    case 33: DrawHotwheelsV1(dl);       break;
     default: break;
     }
 }
