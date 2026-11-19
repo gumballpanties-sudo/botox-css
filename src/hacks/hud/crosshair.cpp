@@ -1780,10 +1780,53 @@ static void ApplyNativeCrosshairState(bool suppress)
     s_chPinned = suppress;
 }
 
+// ==== force crosshair, stock half ===========================================================
+// botox misc.cpp force_crosshair forces the GAME's crosshair onto an unscoped sniper. CS:S
+// C_WeaponCSBase::DrawCrosshair bails on snipers (weapon_csbase.cpp:908). Live x64 client.dll
+// 11-19 disasm, func rva 0x2344e0: `call GetCSWpnData; cmp dword [rax+0x72c], 5; je <ret>` at
+// rva 0x2346f4 (5 = WEAPONTYPE_SNIPER_RIFLE, sig unique). Force swaps that imm8 for 0x7F (no
+// such weapon type) so the stock crosshair (cl_crosshair* cvars, dynamic gap) draws there too.
+// One byte = atomic vs the main thread running DrawCrosshair. Caller (c_basecombatweapon.cpp:218
+// Redraw) has no sniper gate of its own.
+static const char*       k_dcSniperSig = "E8 ? ? ? ? 83 B8 ? ? ? ? 05 0F 84 ? ? ? ? 48 8B 03 48 8B CB";
+static volatile uint8_t* s_dcImm   = nullptr;   // the cmp's imm8 (sig + 11)
+static int               s_dcState = 0;         // 0 unresolved, 1 live, -1 dead
+static bool              s_dcOn    = false;
+
+static void DcSniperPatch(bool on)
+{
+    if (on == s_dcOn || s_dcState < 0) return;
+    if (s_dcState == 0)   // first force use: scan once
+    {
+        HMODULE m = GetModuleHandleA("client.dll");
+        uint8_t* hit = m ? PatternScanUnique(m, k_dcSniperSig) : nullptr;
+        if (!hit)
+        {
+            s_dcState = -1;
+            DebugLog("force crosshair: DrawCrosshair sniper sig NOT FOUND -- stock crosshair stays off on snipers");
+            return;
+        }
+        s_dcImm   = hit + 11;
+        s_dcState = 1;
+        DebugLog("force crosshair: DrawCrosshair sniper check @ rva 0x%llx", (unsigned long long)(hit - (uint8_t*)m));
+    }
+    DWORD old = 0;
+    if (!VirtualProtect((void*)s_dcImm, 1, PAGE_EXECUTE_READWRITE, &old))
+    {
+        DebugLog("force crosshair: VirtualProtect failed (%lu)", GetLastError());
+        return;
+    }
+    *s_dcImm = on ? 0x7F : 0x05;
+    VirtualProtect((void*)s_dcImm, 1, old, &old);
+    FlushInstructionCache(GetCurrentProcess(), (void*)s_dcImm, 1);
+    s_dcOn = on;
+}
+
 // Eject: hand the convar back exactly as we found it.
 void Crosshair_Restore()
 {
     ApplyNativeCrosshairState(false);
+    DcSniperPatch(false);   // client.dll's sniper check back to 5
     KeepKillfeed_Restore();
 }
 
@@ -1931,10 +1974,10 @@ void RenderCrosshair()
     // crosshair must NOT: CS:S draws no sniper crosshair (weapon_csbase.cpp:908), so pinning
     // for it only killed the stock crosshair on every other weapon.
     const bool replaces = (g_chEnable || g_chCsgoEnable) && !g_eject;
-    const bool wanted   = replaces || (g_sniperChEnable && !g_eject);
+    const bool wanted   = (replaces || g_sniperChEnable || g_forceCrosshair) && !g_eject;
     ApplyNativeCrosshairState(replaces && inGame);
 
-    if (!wanted || !inGame || !IsLocalPlayerAlive()) return;
+    if (!wanted || !inGame || !IsLocalPlayerAlive()) { DcSniperPatch(false); return; }
 
     const int  localIdx = GetLocalPlayerIndex();
     const bool scoped   = localIdx > 0 && CssBridge_IsScoped(localIdx);
@@ -1945,8 +1988,10 @@ void RenderCrosshair()
     // custom_crosshair.cpp on_paint_traverse / indicators.cpp sniper_crosshair). On an unscoped
     // sniper the custom one (custom_crosshair.cpp:708) and csgo's own (no sniper crosshair unless
     // misc.cpp force_crosshair forces weapon_debug_spread_show 3) only draw with force on.
-    // CS:S has no weapon_debug_spread_show, so force gates our two instead.
+    // CS:S has no weapon_debug_spread_show: force gates our two here, and the stock one via
+    // DcSniperPatch (pinned to 0 anyway while ours replace it).
     const bool mainCh = !scoped && (!sniper || g_forceCrosshair);
+    DcSniperPatch(g_forceCrosshair && sniper && !scoped);
 
     if (g_chEnable && mainCh) RenderCustomCrosshair();
     if (g_sniperChEnable && !scoped && sniper) SniperCrosshair_Render();

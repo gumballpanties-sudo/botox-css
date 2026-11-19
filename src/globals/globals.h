@@ -521,7 +521,7 @@ extern float g_chTaperFar;           // arm half-thickness scale at the outer en
 extern bool  g_chDotCustomColor;
 extern float g_chDotColor[4];
 extern float g_chRotation;           // degrees, whole crosshair about its centre
-extern bool  g_forceCrosshair;       // custom + csgo crosshair also draw on an unscoped sniper
+extern bool  g_forceCrosshair;       // stock/custom/csgo crosshair also draw on an unscoped sniper
 
 // -- Sniper crosshair (botox indicators.cpp sniper_crosshair, new unit) ------------------------
 // Drawn only while holding a scoped (sniper-class) weapon and NOT currently zoomed in

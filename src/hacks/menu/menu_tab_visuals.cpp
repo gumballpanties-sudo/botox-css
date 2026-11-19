@@ -1112,13 +1112,13 @@ static void Page_VisualsScreen()
             }, ImVec2(220.f, -1));
         }
 
-        // botox misc.cpp force_crosshair: crosshair on an unscoped sniper. CS:S has no
-        // weapon_debug_spread_show and draws no stock sniper crosshair, so this gates the
-        // custom + csgo crosshairs (crosshair.cpp RenderCrosshair). Never while zoomed in.
+        // botox misc.cpp force_crosshair: crosshair on an unscoped sniper. Gates the custom +
+        // csgo crosshairs and patches client.dll's sniper bail for the stock one
+        // (crosshair.cpp RenderCrosshair / DcSniperPatch). Never while zoomed in.
         ImGui::Checkbox("force crosshair##ch", &g_forceCrosshair);
         if (ImGui::IsItemHovered())
-            MenuTooltip("show the custom / csgo crosshair on a sniper (awp/scout/sg550/g3sg1)\n"
-                        "that isn't zoomed in. cs:s itself has no sniper crosshair");
+            MenuTooltip("show your crosshair (stock, custom or csgo) on a sniper\n"
+                        "(awp/scout/sg550/g3sg1) that isn't zoomed in");
 
         ImGui::Checkbox("csgo crosshair", &g_chCsgoEnable);
         if (g_chCsgoEnable)
