@@ -520,6 +520,16 @@ static void GamesenseFrame(ImDrawList* dl, const ImVec2& pos, const ImVec2& size
     dl->PopClipRect();
 }
 
+// csgo menu.cpp primordial_frame: black 180 line 1 px outside the r9 frame, solid accent line under the band
+static void PrimordialFrame(ImDrawList* dl, const ImVec2& pos, const ImVec2& size, float bandH)
+{
+    const ImVec2 max(pos.x + size.x, pos.y + size.y);
+    dl->PushClipRect(ImVec2(pos.x - 1.f, pos.y - 1.f), ImVec2(max.x + 1.f, max.y + 1.f), false);
+    dl->AddRect(ImVec2(pos.x - 1.f, pos.y - 1.f), ImVec2(max.x + 1.f, max.y + 1.f), IM_COL32(0, 0, 0, 180), ImGui::GetStyle().WindowRounding + 1.f);
+    dl->AddRectFilled(ImVec2(pos.x, pos.y + bandH - 1.f), ImVec2(max.x, pos.y + bandH), ImGui::GetColorU32(ImGuiCol_Accent));
+    dl->PopClipRect();
+}
+
 static void SearchBox(float x, float& topY, bool canClick, float dt)
 {
     ImDrawList* dl = ImGui::GetWindowDrawList();
@@ -897,6 +907,7 @@ void RenderMenu()
     dl->PopClipRect();
     RenderFadedGradientLine(dl, ImVec2(wp.x, botY), ImVec2(wz.x, 1.f), ImColor(Accent()));
     if (MenuStyleGamesense(g_menuStyle)) GamesenseFrame(dl, wp, wz);
+    if (MenuStylePrimordial(g_menuStyle)) PrimordialFrame(dl, wp, wz, mf::kHeaderH);
 
     // ---- title: "botox" bold white, then " | <date>" regular accent, same baseline,
     // centred as one unit in the top band.

@@ -1827,13 +1827,6 @@ static bool __fastcall h_DoPostScreenSpaceEffects(void* thisptr, const void* set
         ScreenFxPasses_WarpTick();
     }
 
-    // Player glow (aim/chams.cpp): ref runs CGlow::RenderMain here, before the original --
-    // scene complete, viewmodel + HUD still to come. Material-system calls only, so queued mode is fine.
-    // (Chams_RenderCloaked removed: no Spy-cloak concept in CS:S.)
-    if (!g_eject) { Glow_Render(); }
-
-    const bool ret = o_DoPostSSE(thisptr, setup);
-
     /* THE GOOD PLACE TO DRAW, when we are allowed to. Here the 3D scene is finished and the
        HUD and the viewmodel are not drawn yet (viewrender.cpp:2157, DrawViewModels at 2160),
        so a blur leaves both of them sharp -- which the EndScene fallback cannot, since vgui
@@ -1890,6 +1883,13 @@ static bool __fastcall h_DoPostScreenSpaceEffects(void* thisptr, const void* set
     // the shutter: frame blend's world half, over the web screen (ScreenFx_FrameLate)
     if (route == 1)      ScreenFx_FrameLate(g_d3dDev);
     else if (route == 2) FxQueueOnRenderThread(&s_fxFunctorLate);
+
+    // Player glow + stencil (aim/chams.cpp) over every pass above (botox: glow after the passes).
+    // The passes restore the depth-stencil, so the marks still z test vs the scene. Material-system
+    // calls only, queued mode fine. (Chams_RenderCloaked removed: no Spy-cloak concept in CS:S.)
+    if (!g_eject) Glow_Render();
+
+    const bool ret = o_DoPostSSE(thisptr, setup);
 
     // Flip world: the world is finished and DrawViewModels is next (viewrender.cpp:2160), so the gun
     // draws unmirrored over it. After the passes above so they still read a z buffer that matches the colour.

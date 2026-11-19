@@ -59,6 +59,8 @@ extern ImFont* g_fontLobotomy13;         // sf_pro_display_semibold 13  Bitmap
 extern ImFont* g_fontLobotomyBold13;     // sf_pro_display_bold 13  Bitmap
 extern ImFont* g_fontKamibebra13;        // rubik_regular 13  Bitmap
 extern ImFont* g_fontKamibebraBold13;    // rubik_medium 13  Bitmap|LightHinting
+extern ImFont* g_fontPrimordialRoboto13;       // primordial_roboto_regular 13  menu theme "primordial"
+extern ImFont* g_fontPrimordialRobotoMedium13; // primordial_roboto_medium 13
 extern ImFont* g_fontCumhacck35;         // verdana bd 35  Monochrome|MonoHinting
 extern ImFont* g_fontAirplaneTitle;      // montserrat_regular 10
 extern ImFont* g_fontAirplaneRows;       // tahoma bd 11  MonoHinting

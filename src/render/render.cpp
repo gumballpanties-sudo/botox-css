@@ -61,6 +61,7 @@
 #include "../dependencies/fonts/pt_root_ui_bold.h"
 #include "../dependencies/fonts/dna_clarity_icon.h"
 #include "../dependencies/fonts/minecraft_ttf.h"
+#include "../dependencies/fonts/primordial_roboto.h"   // menu theme "primordial"
 #include <timeapi.h>
 #include "../hacks/screen/aspect_stretch.h"   // unit screen: AspectStretch_Run (aspect ratio overlay stretch)
 #include "../hacks/screen/resolution_spoof.h"   // unit VIS2: ResSpoof::CrunchBackbuffer/NewFrame
@@ -1729,6 +1730,10 @@ static void BuildFontAtlas()
     g_fontKamibebraBold13 = donor(rubik_medium, sizeof(rubik_medium), 13.f, ImGuiFreeTypeBuilderFlags_Bitmap | ImGuiFreeTypeBuilderFlags_LightHinting);
     orElse(g_fontLobotomy13, g_fontBold); orElse(g_fontLobotomyBold13, g_fontLobotomy13);
     orElse(g_fontKamibebra13, g_fontBold); orElse(g_fontKamibebraBold13, g_fontKamibebra13);
+    // botox font_name_primordial_roboto_13 pair: primordial.bin's own roboto, antialiased, px = guess
+    g_fontPrimordialRoboto13       = donor(primordial_roboto_regular, sizeof(primordial_roboto_regular), 13.f, 0);
+    g_fontPrimordialRobotoMedium13 = donor(primordial_roboto_medium, sizeof(primordial_roboto_medium), 13.f, 0);
+    orElse(g_fontPrimordialRoboto13, g_fontReg); orElse(g_fontPrimordialRobotoMedium13, g_fontPrimordialRoboto13);
 
     g_fontCumhacck35    = sys("verdanab.ttf", 35.f, mono);                   orElse(g_fontCumhacck35, g_fontBold);
     g_fontAirplaneTitle = donor(montserrat_regular, sizeof(montserrat_regular), 10.f, 0); orElse(g_fontAirplaneTitle, g_fontBold);

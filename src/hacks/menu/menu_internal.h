@@ -85,3 +85,4 @@ void Tab_Lua();   // menu_tab_lua.cpp -- settings page "lua" (menu.cpp kSettings
 int MenuStyleCount();             // menu_tab_settings.cpp theme rows
 void MenuStyleApplyAt(int i);
 bool MenuStyleGamesense(int i);   // row draws GamesenseFrame (menu.cpp)
+bool MenuStylePrimordial(int i);  // row draws PrimordialFrame (menu.cpp)

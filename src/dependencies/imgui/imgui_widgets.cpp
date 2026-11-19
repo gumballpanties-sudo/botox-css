@@ -1045,10 +1045,15 @@ bool ImGui::ScrollbarEx(const ImRect& bb_frame, ImGuiID id, ImGuiAxis axis, ImS6
         tab_map_item->second.grab_frame = (ImColor)GetColorU32(ImGuiCol_FrameBg);
     }
 
-    // no fade -- instant state color
-    tab_map_item->second.grab_frame = (ImColor)GetColorU32(held ? ImGuiCol_FrameBgActive : hovered ? ImGuiCol_FrameBgHovered : ImGuiCol_FrameBg);
+    // no fade -- instant state color. A menu theme with a scrollbar track (ScrollbarBg alpha > 0, render.cpp init = 0)
+    // colours the grab from the Scrollbar slots; everything else keeps the FrameBg trio (websurface / recorder push it)
+    const bool themed = style.Colors[ImGuiCol_ScrollbarBg].w > 0.f;
+    tab_map_item->second.grab_frame = themed
+        ? (ImColor)GetColorU32(held ? ImGuiCol_ScrollbarGrabActive : hovered ? ImGuiCol_ScrollbarGrabHovered : ImGuiCol_ScrollbarGrab)
+        : (ImColor)GetColorU32(held ? ImGuiCol_FrameBgActive : hovered ? ImGuiCol_FrameBgHovered : ImGuiCol_FrameBg);
 
-    //window->DrawList->AddRectFilled(bb_frame.Min, bb_frame.Max, GetColorU32(ImGuiCol_FrameBg), window->WindowRounding, flags);
+    if (themed)
+        window->DrawList->AddRectFilled(bb.Min, bb.Max, GetColorU32(ImGuiCol_ScrollbarBg), style.ScrollbarRounding);
 
     ImRect grab_rect;
     if (axis == ImGuiAxis_X)

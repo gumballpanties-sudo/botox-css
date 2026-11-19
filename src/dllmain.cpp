@@ -40,6 +40,7 @@ ImFont* g_menuBold     = nullptr;
 ImFont* g_fontTahoma12 = nullptr, *g_fontTahomaBd12 = nullptr, *g_fontChillware13 = nullptr;
 ImFont* g_fontLobotomy13 = nullptr, *g_fontLobotomyBold13 = nullptr;
 ImFont* g_fontKamibebra13 = nullptr, *g_fontKamibebraBold13 = nullptr;
+ImFont* g_fontPrimordialRoboto13 = nullptr, *g_fontPrimordialRobotoMedium13 = nullptr;
 ImFont* g_fontCumhacck35 = nullptr, *g_fontAirplaneTitle = nullptr, *g_fontAirplaneRows = nullptr;
 ImFont* g_fontInterBold15 = nullptr, *g_fontInterMedium15 = nullptr, *g_fontSunflower30 = nullptr;
 ImFont* g_fontInterwebzCalibri = nullptr, *g_fontHavocTahoma13 = nullptr, *g_fontAirflow14 = nullptr;

@@ -155,6 +155,7 @@ struct MenuStyleRow
     ImFont* (*regFont)();    // nullptr = leave the chrome font alone (default style)
     ImFont* (*boldFont)();
     bool gamesense = false;  // skeet frame + gradient bar over the window (menu.cpp GamesenseFrame), layout untouched
+    bool primordial = false; // black 180 outer line + solid accent line (menu.cpp PrimordialFrame), scrollbar colours
 };
 
 static const MenuStyleRow k_menuStyles[] = {
@@ -180,6 +181,12 @@ static const MenuStyleRow k_menuStyles[] = {
     { "gamesense", IM_COL32(20, 20, 20, 255), IM_COL32(12, 12, 12, 255), IM_COL32(23, 23, 23, 255), IM_COL32(35, 35, 35, 255),
       IM_COL32(10, 10, 10, 255), IM_COL32(10, 10, 10, 255), IM_COL32(23, 23, 23, 255), IM_COL32(205, 205, 205, 255),
       IM_COL32(120, 120, 120, 255), 0.f, 0.f, 0.f, nullptr, nullptr, true },
+    // csgo menu.cpp "primordial" row: primordial.bin frame 41 r9, content 29, tiles 34, widget 29 + 41 r2,
+    // tooltip 29 + 41 r2, label 210, idle value 127, its own roboto pair
+    { "primordial", IM_COL32(29, 29, 29, 255), IM_COL32(41, 41, 41, 255), IM_COL32(34, 34, 34, 255), IM_COL32(29, 29, 29, 255),
+      IM_COL32(41, 41, 41, 255), IM_COL32(41, 41, 41, 255), IM_COL32(29, 29, 29, 255), IM_COL32(210, 210, 210, 255),
+      IM_COL32(127, 127, 127, 255), 9.f, 2.f, 2.f, []() -> ImFont* { return g_fontPrimordialRoboto13; },
+      []() -> ImFont* { return g_fontPrimordialRobotoMedium13; }, false, true },
 };
 static const int k_menuStyleCount = (int)(sizeof(k_menuStyles) / sizeof(k_menuStyles[0]));
 
@@ -201,11 +208,21 @@ static void MenuStyleApply(const MenuStyleRow& s)
     // null = font not loaded (system calibri missing): keep the verdana pair, chrome calls CalcTextSize on it
     if (ImFont* f = s.regFont ? s.regFont() : nullptr)   g_menuReg  = f;
     if (ImFont* f = s.boldFont ? s.boldFont() : nullptr) g_menuBold = f;
+    // primordial scrollbar: track 34, thumb 41 / hover 61 / held accent, round ends
+    if (s.primordial)
+    {
+        style.Colors[ImGuiCol_ScrollbarBg]          = ImGui::ColorConvertU32ToFloat4(IM_COL32(34, 34, 34, 255));
+        style.Colors[ImGuiCol_ScrollbarGrab]        = ImGui::ColorConvertU32ToFloat4(IM_COL32(41, 41, 41, 255));
+        style.Colors[ImGuiCol_ScrollbarGrabHovered] = ImGui::ColorConvertU32ToFloat4(IM_COL32(61, 61, 61, 255));
+        style.Colors[ImGuiCol_ScrollbarGrabActive]  = style.Colors[ImGuiCol_Accent];
+        style.ScrollbarRounding = 9.f;
+    }
 }
 
 int MenuStyleCount() { return k_menuStyleCount; }
 void MenuStyleApplyAt(int i) { MenuStyleApply(k_menuStyles[i]); }
 bool MenuStyleGamesense(int i) { return k_menuStyles[i].gamesense; }
+bool MenuStylePrimordial(int i) { return k_menuStyles[i].primordial; }
 
 // botox tab_settings: col1 "config" + "system", col2 "visuals config" + "menu". Left out, no
 // TF2 counterpart: "botox network" (no TF2 server).
