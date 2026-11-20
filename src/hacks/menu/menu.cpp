@@ -245,7 +245,37 @@ bool ImGui::ColorRow(const char* label, float col[4], ImGuiColorEditFlags flags,
     return ColorEdit4(label, col, flags, swatch_slot);
 }
 
-void MenuSectionHeader(const char* label) { SectionHeader(label); }
+// botox movement_recorder.cpp panel_chrome / points_ui.cpp point settings 1:1: band 25 + outline 50 =
+// the default menu style's band / window outline. This fork's WindowMinSize is 300x60 (botox 32x32),
+// so Begin runs under botox's: fixed-size panels came out 300 wide.
+void MenuPanelBegin(const char* id, const char* title, int flags, float alpha)
+{
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowMinSize, ImVec2(32.f, 32.f));
+    ImGui::Begin(id, nullptr, flags);
+    ImGui::PopStyleVar();
+
+    ImGuiWindow* window = ImGui::GetCurrentWindow();
+    ImDrawList* dl = window->DrawList;
+    const ImVec2 pos = window->Pos, size = window->Size;
+    const float rounding = ImGui::GetStyle().WindowRounding;
+    const float band = mf::kHeaderH;
+
+    ImGui::PushClipRect(pos, ImVec2(pos.x + size.x, pos.y + band), false);
+    dl->AddRectFilled(pos, ImVec2(pos.x + size.x, pos.y + band), ImColor(25 / 255.f, 25 / 255.f, 25 / 255.f, alpha), rounding,
+                      ImDrawFlags_RoundCornersTop);
+    ImGui::PopClipRect();
+
+    RenderFadedGradientLine(dl, ImVec2(pos.x, pos.y + band - 1.f), ImVec2(size.x, 1.f), ImColor(ImGui::GetColorU32(ImGuiCol_Accent)));
+
+    ImFont* bold = BoldFont();
+    const ImVec2 ts = bold->CalcTextSizeA(bold->FontSize, FLT_MAX, 0.f, title);
+    dl->AddText(bold, bold->FontSize, ImVec2(pos.x + (size.x - ts.x) * 0.5f, pos.y + (band - ts.y) * 0.5f), ImColor(1.f, 1.f, 1.f, alpha), title);
+
+    ImGui::PushClipRect(ImVec2(pos.x + 1.f, pos.y + 1.f), ImVec2(pos.x + size.x - 1.f, pos.y + size.y - 1.f), false);
+    dl->AddRect(ImVec2(pos.x + 1.f, pos.y + 1.f), ImVec2(pos.x + size.x - 1.f, pos.y + size.y - 1.f),
+                ImColor(50 / 255.f, 50 / 255.f, 50 / 255.f, alpha), rounding);
+    ImGui::PopClipRect();
+}
 
 void MenuBindKey(const char* id, int* key, int* mode) { ImGui::Keybind(id, key, mode, true); }
 

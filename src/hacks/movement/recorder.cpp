@@ -5,7 +5,8 @@
 #include "prediction.h"            // EntV3 / EntI, g_globalVars
 #include "../aim/aim.h"            // Aim_ChatPrint
 #include "../../render/render.h"   // W2S_Project
-#include "../../render/dpi.h"      // botox render_indicator: queued stretch block (dpi scale panels)
+#include "../menu/menu.h"          // MenuPanelBegin: botox panel_chrome
+#include "../../dependencies/imgui/imgui_internal.h"   // GetCurrentWindow: row panel text
 #include <atomic>
 #include <cfloat>
 #include <cstdio>
@@ -945,67 +946,81 @@ static void RenderRoutePreview(ImDrawList* dl)
     }
 }
 
-static void RenderIndicator(ImDrawList* dl)
+// ---- botox 0b8b565 recorder panels: practice / point settings / route calc chrome (MenuPanelBegin),
+// title band + one grey label / white value row (route calc keys panel layout)
+static constexpr float k_panelBand = 25.f, k_panelPad = 8.f;
+
+static ImVec2 RowPanelSize(ImFont* font, const char* title, const char* label, const char* value)
 {
-    if (!g_recRender) return;
-    const float dt = ImGui::GetIO().DeltaTime;
-    const float target = (s_recording || OwnsCmd()) ? 1.f : 0.f;
-    s_indAlpha = std::clamp(s_indAlpha + (target - s_indAlpha) * (1.f - std::exp(-k_indicatorLerpK * dt)), 0.f, 1.f);
-    if (s_indAlpha <= 0.01f) return;
-    DpiPanelScope block(dl);
-    ImFont* font = g_menuReg ? g_menuReg : ImGui::GetFont();
-
-    const std::string text = s_recording ? "rec " + std::to_string(s_recFrames.size())
-                                         : std::to_string(s_playIdx) + " / " + std::to_string(s_playFrames.size());
-    const ImVec2 ts = font->CalcTextSizeA(font->FontSize, FLT_MAX, 0.f, text.c_str());
-    const ImVec2 pad(7.f, 7.f), margin(4.f, 3.f);
-    const ImVec2 size(ts.x + margin.x * 2.f, ts.y + margin.y * 2.f);
-    const ImVec2 disp = ImGui::GetIO().DisplaySize;
-
-    ImVec2 pos;
-    switch (g_recPosition)
-    {
-    default:
-    case 0: pos = ImVec2(pad.x, pad.y); break;
-    case 1: pos = ImVec2(pad.x, disp.y - size.y - pad.y); break;
-    case 2: pos = ImVec2(disp.x - size.x - pad.x, disp.y - size.y - pad.y); break;
-    }
-    dl->AddRectFilled(pos, ImVec2(pos.x + size.x, pos.y + size.y), ImGui::GetColorU32(ImVec4(0.08f, 0.08f, 0.08f, s_indAlpha)));
-    dl->AddRectFilled(ImVec2(pos.x, pos.y - 1.f), ImVec2(pos.x + size.x, pos.y), AccentU32(s_indAlpha));
-    OutlinedText(dl, font, font->FontSize, ImVec2(pos.x + margin.x, pos.y + margin.y),
-                 ImGui::GetColorU32(ImVec4(1.f, 1.f, 1.f, s_indAlpha)), text.c_str());
+    ImFont* bold = g_menuBold ? g_menuBold : font;
+    auto W = [](ImFont* f, const char* s) { return f->CalcTextSizeA(f->FontSize, FLT_MAX, 0.f, s).x; };
+    return ImVec2(std::max(W(font, label) + 22.f + W(font, value) + k_panelPad * 2.f, W(bold, title) + 40.f),
+                  k_panelBand + k_panelPad + font->FontSize + 2.f);
 }
+
+static void RowPanel(const char* id, ImFont* font, const char* label, const char* value, int flags, float alpha)
+{
+    MenuPanelBegin(id, "recorder", flags, alpha);
+    ImGuiWindow* w = ImGui::GetCurrentWindow();
+    const float valueW = font->CalcTextSizeA(font->FontSize, FLT_MAX, 0.f, value).x;
+    const float rowY = w->Pos.y + k_panelBand + 2.f;
+    w->DrawList->AddText(font, font->FontSize, ImVec2(w->Pos.x + k_panelPad, rowY), ImColor(0.63f, 0.63f, 0.63f, alpha), label);
+    w->DrawList->AddText(font, font->FontSize, ImVec2(w->Pos.x + w->Size.x - k_panelPad - valueW, rowY), ImColor(1.f, 1.f, 1.f, alpha), value);
+    ImGui::End();
+}
+
+// botox panel_flags minus its "game window focused" NoMove: ImGui gets no mouse here while unfocused
+static constexpr int k_panelFlags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoCollapse |
+                                    ImGuiWindowFlags_NoResize;
 
 static void RenderClipperBox()
 {
     if (!g_recClipper || !g_recClipperBox) return;
     const float dt = g_globalVars ? g_globalVars->interval_per_tick : 0.015f;
-    char buf[48] = {};
-    if (s_playing)               snprintf(buf, sizeof(buf), "%.1f / %.1f", (float)s_playIdx * dt, (float)s_playFrames.size() * dt);
-    else if (s_recording)        snprintf(buf, sizeof(buf), "rec %.1f", (float)s_recFrames.size() * dt);
-    else if (!s_clipBuf.empty()) snprintf(buf, sizeof(buf), "clip %.1f", (float)s_clipBuf.size() * dt);
+    const char* label = nullptr;
+    char value[48] = {};
+    if (s_playing)               { label = "playback";    snprintf(value, sizeof(value), "%.1f / %.1f s", (float)s_playIdx * dt, (float)s_playFrames.size() * dt); }
+    else if (s_recording)        { label = "recording";   snprintf(value, sizeof(value), "%.1f s", (float)s_recFrames.size() * dt); }
+    else if (!s_clipBuf.empty()) { label = "clip buffer"; snprintf(value, sizeof(value), "%.1f s", (float)s_clipBuf.size() * dt); }
     else return;
 
-    if (g_menuReg) ImGui::PushFont(g_menuReg);
-    const float width = ImGui::CalcTextSize(buf).x + 14.f;
+    ImFont* font = g_menuReg ? g_menuReg : ImGui::GetFont();
     ImGui::SetNextWindowPos(ImVec2(24.f, 96.f), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(width, 22.f), ImGuiCond_Always);
-    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.04f, 0.04f, 0.04f, 1.f));
-    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.f, 0.f, 0.f, 1.f));
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 3.f);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(5.f, 4.f));
-    if (ImGui::Begin("##mr_clipper_box", nullptr,
-                     ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoScrollbar
-                         | ImGuiWindowFlags_NoFocusOnAppearing))
+    ImGui::SetNextWindowSize(RowPanelSize(font, "recorder", label, value), ImGuiCond_Always);
+    RowPanel("botox-recorder-clipper", font, label, value, k_panelFlags | ImGuiWindowFlags_NoFocusOnAppearing, 1.f);
+}
+
+// botox moved this off the paint queue onto the clipper box's window chrome (0b8b565)
+static void RenderIndicator()
+{
+    if (!g_recRender) return;
+    const float target = (s_recording || OwnsCmd()) ? 1.f : 0.f;
+    s_indAlpha = std::clamp(s_indAlpha + (target - s_indAlpha) * (1.f - std::exp(-k_indicatorLerpK * ImGui::GetIO().DeltaTime)), 0.f, 1.f);
+    if (s_indAlpha <= 0.01f) return;
+
+    const char* label = nullptr;
+    char value[48] = {};
+    if (s_recording) { label = "recording"; snprintf(value, sizeof(value), "%zu ticks", s_recFrames.size()); }
+    else             { label = s_wishStart ? "going to start" : "playback"; snprintf(value, sizeof(value), "%zu / %zu", s_playIdx, s_playFrames.size()); }
+
+    ImFont* font = g_menuReg ? g_menuReg : ImGui::GetFont();
+    constexpr float edge = 7.f;
+    const ImVec2 size = RowPanelSize(font, "recorder", label, value);
+    const ImVec2 disp = ImGui::GetMainViewport()->Size;   // a window: logical (dpi) px, not the screen
+
+    ImVec2 pos(edge, edge);
+    switch (g_recPosition)
     {
-        const ImVec2 ts = ImGui::CalcTextSize(buf);
-        ImGui::SetCursorPosX((ImGui::GetWindowSize().x - ts.x) * 0.5f);
-        ImGui::TextUnformatted(buf);
+    case 1: pos = ImVec2(edge, disp.y - size.y - edge); break;
+    case 2: pos = ImVec2(disp.x - size.x - edge, disp.y - size.y - edge); break;
+    default: break;
     }
-    ImGui::End();
-    ImGui::PopStyleVar(2);
-    ImGui::PopStyleColor(2);
-    if (g_menuReg) ImGui::PopFont();
+
+    ImGui::PushStyleVar(ImGuiStyleVar_Alpha, s_indAlpha);
+    ImGui::SetNextWindowPos(pos, ImGuiCond_Always);
+    ImGui::SetNextWindowSize(size, ImGuiCond_Always);
+    RowPanel("botox-recorder-timer", font, label, value, k_panelFlags | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoInputs, s_indAlpha);
+    ImGui::PopStyleVar();
 }
 
 static void RenderClipEditor()
@@ -1015,39 +1030,25 @@ static void RenderClipEditor()
     RecClip& clip = s_clips[s_editorClip];
 
     const ImVec2 disp = ImGui::GetMainViewport()->Size;   // a window: logical (dpi) px, not the screen
-    ImGui::SetNextWindowPos(ImVec2(disp.x - 330.f, 20.f), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(310.f, 165.f), ImGuiCond_FirstUseEver);
-    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.04f, 0.04f, 0.04f, 1.f));
-    ImGui::PushStyleColor(ImGuiCol_TitleBg, ImVec4(0.08f, 0.08f, 0.08f, 1.f));
-    ImGui::PushStyleColor(ImGuiCol_TitleBgActive, ImVec4(0.08f, 0.08f, 0.08f, 1.f));
-    ImGui::PushStyleColor(ImGuiCol_TitleBgCollapsed, ImVec4(0.08f, 0.08f, 0.08f, 1.f));
-    ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.02f, 0.02f, 0.02f, 1.f));
-    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.02f, 0.02f, 0.02f, 1.f));
-    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.f, 0.f, 0.f, 1.f));
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 3.f);
-    if (g_menuReg) ImGui::PushFont(g_menuReg);
+    const float tick = (float)std::max(clip.tickrate, 1);
+    ImGui::SetNextWindowPos(ImVec2(disp.x - 270.f, 20.f), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSizeConstraints(ImVec2(250.f, 0.f), ImVec2(250.f, FLT_MAX));
+    MenuPanelBegin("botox-recorder-editor", "edit route", k_panelFlags | ImGuiWindowFlags_AlwaysAutoResize);
+    ImGui::SetCursorPosY(30.f);
 
-    if (ImGui::Begin("recorder clip", &s_editorOpen, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize))
-    {
-        ImGui::Text("%zu ticks  %d tick", clip.frames.size(), clip.tickrate);
-        ImGui::SetNextItemWidth(-1.f);
-        ImGui::InputText("##mr_editor_name", s_editorName, sizeof(s_editorName));
+    const int maxFrame = (int)clip.frames.size() - 1;
+    s_editorStart = std::clamp(s_editorStart, 0, maxFrame);
+    s_editorEnd   = std::clamp(s_editorEnd, 0, maxFrame);
 
-        const int maxFrame = (int)clip.frames.size() - 1;
-        s_editorStart = std::clamp(s_editorStart, 0, maxFrame);
-        s_editorEnd   = std::clamp(s_editorEnd, 0, maxFrame);
-        ImGui::SetNextItemWidth(-1.f);
-        ImGui::SliderInt("##mr_start_frame", &s_editorStart, 0, maxFrame, "start tick %d");
-        ImGui::SetNextItemWidth(-1.f);
-        ImGui::SliderInt("##mr_end_frame", &s_editorEnd, 0, maxFrame, "end tick %d");
+    ImGui::TextDisabled("%zu ticks   %.1f s   %d tick", clip.frames.size(), (float)clip.frames.size() / tick, clip.tickrate);
+    ImGui::InputText("name##mr_editor", s_editorName, sizeof(s_editorName));
+    ImGui::SliderInt("start tick##mr_editor", &s_editorStart, 0, maxFrame, "%d");
+    ImGui::SliderInt("end tick##mr_editor", &s_editorEnd, 0, maxFrame, "%d");
+    ImGui::TextDisabled("kept %.1f s", (float)(std::abs(s_editorEnd - s_editorStart) + 1) / tick);
 
-        if (ImGui::Button("apply", ImVec2(-1.f, 15.f))) ApplyClipEditor();
-        if (ImGui::Button("close", ImVec2(-1.f, 15.f))) s_editorOpen = false;
-    }
+    if (ImGui::Button("apply", ImVec2(-1.f, 15.f))) ApplyClipEditor();
+    if (ImGui::Button("close", ImVec2(-1.f, 15.f))) s_editorOpen = false;
     ImGui::End();
-    if (g_menuReg) ImGui::PopFont();
-    ImGui::PopStyleVar();
-    ImGui::PopStyleColor(7);
 }
 
 // botox check_map_change, on the render tick like botox's paint
@@ -1099,7 +1100,7 @@ static void RenderBody()
         else if (s_recording) RenderPath(dl, s_recFrames, 0);
         else                  RenderRoutePreview(dl);
     }
-    RenderIndicator(dl);
+    RenderIndicator();
     RenderClipEditor();
     RenderClipperBox();
 }

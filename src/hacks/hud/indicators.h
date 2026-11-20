@@ -13,8 +13,9 @@
 enum IndStyle { IND_STYLE_DEFAULT = 0, IND_STYLE_STATIC, IND_STYLE_SMOOTH, IND_STYLE_MITOSIS, IND_STYLE_KAMIDERE, IND_STYLE_SQUASH, IND_STYLE_KAMIBEBRA };
 inline constexpr const char* kIndStyleNames = "default\0static\0smooth\0mitosis\0kamidere\0squash & stretch\0kamibebra\0";
 
-enum IndSmoothOrigin { SMOOTH_ORIGIN_AUTO = 0, SMOOTH_ORIGIN_RIGHT, SMOOTH_ORIGIN_BOTTOM };
-inline constexpr const char* kSmoothOriginNames = "auto\0right\0bottom\0";
+// left / top appended: old cfg 1 = right, 2 = bottom kept
+enum IndSmoothOrigin { SMOOTH_ORIGIN_AUTO = 0, SMOOTH_ORIGIN_RIGHT, SMOOTH_ORIGIN_BOTTOM, SMOOTH_ORIGIN_LEFT, SMOOTH_ORIGIN_TOP };
+inline constexpr const char* kSmoothOriginNames = "auto\0right\0bottom\0left\0top\0";
 
 enum IndPreLayout { PRE_LAYOUT_RIGHT = 0, PRE_LAYOUT_ABOVE, PRE_LAYOUT_BELOW };
 inline constexpr const char* kPreLayoutNames = "right\0above\0below\0";
@@ -60,6 +61,8 @@ inline bool  g_viCustomColor  = false;
 inline int   g_viPadding      = 125;
 inline int   g_viStyle        = 0;
 inline int   g_viSmoothOrigin = 0;
+inline float g_viSmoothAngle  = 0.f;     // deg -90..90, + = tilt toward bottom (left/right) or right (top/bottom)
+inline bool  g_viSmoothRandomAngle = false;   // pre speed rolls own angle in +-|angle| each show
 inline bool  g_viShadow       = true;
 inline float g_viShadowBlur   = 0.f;
 inline float g_viShadowColor[4] = { 0.f, 0.f, 0.f, 1.f };
@@ -84,6 +87,7 @@ inline float g_viColor5[4] = {  30 / 255.f, 255 / 255.f, 109 / 255.f, 1.f };   /
 inline bool  g_siEnable       = false;
 inline int   g_siStyle        = 0;
 inline int   g_siSmoothOrigin = 0;
+inline float g_siSmoothAngle  = 0.f;     // botox: stamina has no random angle
 inline float g_siColor1[4] = { 1.f, 1.f, 1.f, 1.f };
 inline float g_siColor2[4] = { 1.f, 1.f, 1.f, 1.f };
 inline bool  g_siPreSpeed     = false;
@@ -130,6 +134,8 @@ inline bool  g_vgTextShadow  = true;
 inline bool  g_kiEnable       = false;
 inline int   g_kiStyle        = 0;
 inline int   g_kiSmoothOrigin = 0;
+inline float g_kiSmoothAngle  = 0.f;
+inline bool  g_kiSmoothRandomAngle = false;   // each tag rolls own angle in +-|angle| on spawn
 inline float g_kiStaticFade   = 0.f;
 inline float g_kiColor[4]        = { 1.f, 1.f, 1.f, 1.f };
 inline float g_kiColorSuccess[4] = { 0.f, 1.f, 0.f, 1.f };

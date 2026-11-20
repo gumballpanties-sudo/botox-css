@@ -21,8 +21,18 @@ void UnitB_Menu_movement_indicators()
         ImGui::OptionPopup("velocity indicator settings", [&]() {
             ImGui::Combo("style##velocity indicator style", &g_viStyle, kIndStyleNames);
 
-            if (g_viStyle == IND_STYLE_SMOOTH)
+            if (g_viStyle == IND_STYLE_SMOOTH || g_viStyle == IND_STYLE_KAMIBEBRA) {
                 ImGui::Combo("comes from##velocity indicator", &g_viSmoothOrigin, kSmoothOriginNames);
+                // kamibebra auto = fades in place, no direction
+                if (g_viStyle == IND_STYLE_SMOOTH || g_viSmoothOrigin != SMOOTH_ORIGIN_AUTO) {
+                    // random = pre speed rolls its own angle in +-max each show
+                    ImGui::Checkbox("random angle##velocity indicator", &g_viSmoothRandomAngle);
+                    if (g_viSmoothRandomAngle)
+                        ImGui::SliderFloat("max angle##velocity indicator", &g_viSmoothAngle, 0.f, 90.f, "%.0f deg", ImGuiSliderFlags_AlwaysClamp);
+                    else
+                        ImGui::SliderFloat("angle##velocity indicator", &g_viSmoothAngle, -90.f, 90.f, "%.0f deg", ImGuiSliderFlags_AlwaysClamp);
+                }
+            }
 
             if (g_viStyle == IND_STYLE_KAMIDERE)
                 ImGui::ColorRow("kami shadow color##velocity indicator", g_indKamiShadowColor);
@@ -82,8 +92,11 @@ void UnitB_Menu_movement_indicators()
         ImGui::OptionPopup("stamina indicator settings", [&]() {
             ImGui::Combo("style##stamina indicator style", &g_siStyle, kIndStyleNames);
 
-            if (g_siStyle == IND_STYLE_SMOOTH)
+            if (g_siStyle == IND_STYLE_SMOOTH || g_siStyle == IND_STYLE_KAMIBEBRA) {
                 ImGui::Combo("comes from##stamina indicator", &g_siSmoothOrigin, kSmoothOriginNames);
+                if (g_siStyle == IND_STYLE_SMOOTH || g_siSmoothOrigin != SMOOTH_ORIGIN_AUTO)
+                    ImGui::SliderFloat("angle##stamina indicator", &g_siSmoothAngle, -90.f, 90.f, "%.0f deg", ImGuiSliderFlags_AlwaysClamp);
+            }
 
             if (g_siStyle == IND_STYLE_KAMIDERE)
                 ImGui::ColorRow("kami shadow color##stamina indicator", g_indKamiShadowColor);
@@ -172,8 +185,15 @@ void UnitB_Menu_movement_indicators()
         ImGui::OptionPopup("keybind indicator settings", [&]() {
             ImGui::Combo("style##keybind indicator style", &g_kiStyle, kIndStyleNames);
 
-            if (g_kiStyle == IND_STYLE_SMOOTH)
+            if (g_kiStyle == IND_STYLE_SMOOTH || g_kiStyle == IND_STYLE_KAMIBEBRA) {
                 ImGui::Combo("comes from##keybind indicators", &g_kiSmoothOrigin, kSmoothOriginNames);
+                // random = each tag rolls its own angle in +-max on turn on
+                ImGui::Checkbox("random angle##keybind indicators", &g_kiSmoothRandomAngle);
+                if (g_kiSmoothRandomAngle)
+                    ImGui::SliderFloat("max angle##keybind indicators", &g_kiSmoothAngle, 0.f, 90.f, "%.0f deg", ImGuiSliderFlags_AlwaysClamp);
+                else
+                    ImGui::SliderFloat("angle##keybind indicators", &g_kiSmoothAngle, -90.f, 90.f, "%.0f deg", ImGuiSliderFlags_AlwaysClamp);
+            }
 
             if (g_kiStyle == IND_STYLE_STATIC)
                 ImGui::SliderFloat("fade in##keybind indicators", &g_kiStaticFade, 0.f, 1.f, "%.2f s");
