@@ -1355,6 +1355,7 @@ static void StyleFonts(int style, ImFont*& title, ImFont*& artist, float& size)
     case 20: pick(g_fontHowewewareMinecraft14, g_fontHowewewareMinecraft14); break;
     case 21: pick(g_fontGamesenseSfBold15, g_fontGamesenseSfBold15); size = 13.f; break;
     case 22: pick(g_fontArialBd16, g_fontArialBd16); break;   // boxed music display face
+    case 23: pick(g_fontGrimoireBold11, g_fontGrimoireBold11); break;
     default: break;
     }
     if (!title || !artist) {

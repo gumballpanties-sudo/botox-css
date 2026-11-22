@@ -16,7 +16,8 @@
 //   8 airflow    sf ui display 14  19 cucumber    tahoma 14 (verdana 14 measures)
 //   9 ev0lve     segoe ui 16       20 howeweware  minecraft 14
 //  10 legendware verdana 12 mono   21 gamesense   sf pro bold 15 @ 13
-//  11 interium   droid bold 24 @ 16
+//  11 interium   droid bold 24 @ 16   22 boxed       arialbd 16
+//                                     23 grimoire    tahomabd 11 mono
 // Accent = the menu accent (ImGuiCol_Accent), as in botox. Sets g_wmBox.
 void Watermark_Draw();
 

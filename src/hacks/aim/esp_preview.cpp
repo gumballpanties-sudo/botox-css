@@ -109,6 +109,7 @@ namespace
 	int  s_sequence = 0;
 	int  s_stage = 0;
 	bool s_ready = false, s_failed = false;
+	bool s_warm = false;   // preload done: ent built + drawn once (materials, animations loaded)
 	int  s_builtConnected = -1, s_builtIndex = -2;
 
 	// our own calls on the game thread: the GetModel / lightcache hooks act only inside them
@@ -613,7 +614,9 @@ void EspPreview::Paint()
 	const int frame = s_frame.load();
 	const bool wanted = frame != s_seenFrame;
 	s_seenFrame = frame;
-	if (!wanted || G::Unload || !g_espPreview || !I::EngineClient || !I::RenderView || !I::ModelInfoClient)
+	// preload, menu closed: build + one hidden draw (first draw loads materials + animations), opening the tab = no hitch
+	const bool preload = !wanted && !s_warm && !s_failed;
+	if ((!wanted && !preload) || G::Unload || !g_espPreview || !I::EngineClient || !I::RenderView || !I::ModelInfoClient)
 		return;
 
 	// the target keeps the last frame: 60 renders a second whatever the game fps
@@ -622,8 +625,13 @@ void EspPreview::Paint()
 		return;
 	s_lastRender = now;
 
-	if (Init())
+	// finishing step and first draw on separate paints: splits the load hitch
+	const bool wasReady = s_ready;
+	if (Init() && wasReady)
+	{
 		Render();
+		s_warm = true;
+	}
 }
 
 void EspPreview::OnEject()

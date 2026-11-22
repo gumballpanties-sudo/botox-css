@@ -1699,6 +1699,8 @@ static void BuildFontAtlas()
     g_fontKamibebra13     = donor(rubik_regular, sizeof(rubik_regular), 13.f, ImGuiFreeTypeBuilderFlags_Bitmap);
     g_fontKamibebraBold13 = donor(rubik_medium, sizeof(rubik_medium), 13.f, ImGuiFreeTypeBuilderFlags_Bitmap | ImGuiFreeTypeBuilderFlags_LightHinting);
     orElse(g_fontLobotomy13, g_fontBold); orElse(g_fontLobotomyBold13, g_fontLobotomy13);
+    // grimoire menu_font_bold: tahomabd 11, mono hinting (its Bitmap flag is a no-op, tahomabd has no EBDT)
+    g_fontGrimoireBold11 = sys("tahomabd.ttf", 11.f, mono);               orElse(g_fontGrimoireBold11, g_fontBold);
     orElse(g_fontKamibebra13, g_fontBold); orElse(g_fontKamibebraBold13, g_fontKamibebra13);
     // botox font_name_primordial_roboto_13 pair: primordial.bin's own roboto, antialiased, px = guess
     g_fontPrimordialRoboto13       = donor(primordial_roboto_regular, sizeof(primordial_roboto_regular), 13.f, 0);

@@ -57,6 +57,7 @@ extern ImFont* g_fontTahomaBd12;         // tahoma bd 12  Monochrome|MonoHinting
 extern ImFont* g_fontChillware13;        // verdana bd 13  NoHinting
 extern ImFont* g_fontLobotomy13;         // sf_pro_display_semibold 13  Bitmap
 extern ImFont* g_fontLobotomyBold13;     // sf_pro_display_bold 13  Bitmap
+extern ImFont* g_fontGrimoireBold11;     // tahoma bd 11  Monochrome|MonoHinting (grimoire wm + spec header)
 extern ImFont* g_fontKamibebra13;        // rubik_regular 13  Bitmap
 extern ImFont* g_fontKamibebraBold13;    // rubik_medium 13  Bitmap|LightHinting
 extern ImFont* g_fontPrimordialRoboto13;       // primordial_roboto_regular 13  menu theme "primordial"
