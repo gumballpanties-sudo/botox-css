@@ -33,6 +33,7 @@ struct EbPlan_t
     float bend = 0.f;
     Vec3 end{};
     bool ducked = false;
+    bool lift = false;   // edgesurf on eb: edge surf can carry on from its end (ESurf_EbEnd)
 };
 
 // ---- live state (botox impl_t members) ----
@@ -49,6 +50,11 @@ static EbCmd_t  s_ebCmds[k_ebMaxTicks] = {};   // m_predicted_cmds
 static EbCmd_t  s_ebRun[k_ebMaxTicks]  = {};   // m_run_cmds
 static EbPlan_t s_ebPlans[k_ebPlanMax];
 static int   s_ebPlanCount = 0;
+// edgesurf on eb (botox m_fallback): s_ebPlans holds liftable plans only, the first other find waits here
+static EbPlan_t s_ebFallback;
+static bool  s_ebFallbackOk = false;
+static bool  s_ebLastLift = false;   // the latched plan's lift (botox last_lift)
+static bool  s_ebLastDuck = false;   // the latched plan's bug tick stance (botox last_bug_duck)
 static Vec3  s_ebFollowEnd{};
 static bool  s_ebDucked = false;          // m_ducked: the plan's duck is held past its replay until the fall restarts
 static float s_ebMouseX = 0.f;            // OverrideMouseInput x, drained each EdgeBugPost
@@ -1432,6 +1438,8 @@ static void EdgeBugPost(void* pLocal, UserCmd_t* pCmd)
 
     const bool toEdge = g_edgeBugToEdge;
     const bool autostrafe = toEdge;   // to-edge IS the autostrafe switch
+    // edgesurf on eb: the bug tick must be an exact pin at a ledge top, plans edge surf can carry on from ( lift ) go first
+    const bool esurf = g_edgeBugEdgeSurf && g_edgeBugStyle == 0;
     int searchCount = mode == 1 ? 4 : 6;
     if (toEdge && searchCount < 8) searchCount = 8;
     if (!autostrafe && searchCount > 4) searchCount = 4;
@@ -1447,7 +1455,8 @@ static void EdgeBugPost(void* pLocal, UserCmd_t* pCmd)
 
     if (s_ebDetected && steer) s_ebSteerSince += delta.y;
     // re-plan: mouse turned >= 1 deg since the latch, never swap a bug 2 ticks out (botox :707)
-    const bool replan = s_ebDetected && steer && fabsf(s_ebSteerSince) >= 1.f
+    // edgesurf on eb: a held plan with no lift keeps searching for one ( botox :761 )
+    const bool replan = s_ebDetected && ((steer && fabsf(s_ebSteerSince) >= 1.f) || (esurf && !s_ebLastLift))
                      && s_ebLockTicks - s_ebCurrentTick >= EbTicks(2);
     if (!s_ebDetected || replan) do
     {
@@ -1483,6 +1492,7 @@ static void EdgeBugPost(void* pLocal, UserCmd_t* pCmd)
 
         s_ebSteerSince = 0.f;
         s_ebPlanCount = 0;
+        s_ebFallbackOk = false;
         const int wantPaths = steer ? std::clamp(g_edgeBugPaths, 1, k_ebPlanMax) : 1;
         auto enough = [&] { return s_ebPlanCount >= wantPaths; };
         if (liveVel.Length2D() > 30.f) { s_ebCourseYaw = RAD2DEGF(atan2f(liveVel.y, liveVel.x)); s_ebCourseValid = true; }
@@ -1623,19 +1633,24 @@ static void EdgeBugPost(void* pLocal, UserCmd_t* pCmd)
             Vec3 pendingPos{};
             float pendingVz = 0.f;
             bool pendingDucked = false;
+            bool pendingLift = false;
             bool runFound = false;
-            auto latch = [&](int tickIndex, const Vec3& endPos, bool ducked)
+            auto latch = [&](int tickIndex, const Vec3& endPos, bool ducked, bool lift)
             {
                 runFound = true;
                 if (!MV_EbSpeedOk(liveVel.Length2D(), EntV3(pLocal, g_offVelocity).Length2D())) { nSlow++; return; }
+                // edgesurf on eb ( botox :979 ): a find edge surf cannot carry on from is the one fallback, never a plan
+                const bool spare = esurf && !lift;
+                if (spare && s_ebFallbackOk) return;
                 // same variant landing within 4u of a kept plan = same path, not an alternative
-                for (int p = 0; p < s_ebPlanCount; p++)
+                for (int p = 0; p < s_ebPlanCount && !spare; p++)
                     if (s_ebPlans[p].variant == v && s_ebPlans[p].end.DistTo(endPos) < 4.f) return;
-                if (s_ebPlanCount >= k_ebPlanMax) return;
-                EbPlan_t& pl = s_ebPlans[s_ebPlanCount++];
+                if (!spare && s_ebPlanCount >= k_ebPlanMax) return;
+                s_ebFallbackOk |= spare;
+                EbPlan_t& pl = spare ? s_ebFallback : s_ebPlans[s_ebPlanCount++];
                 memcpy(pl.cmds, s_ebRun, sizeof(EbCmd_t) * (tickIndex + 1));
                 pl.ticks = tickIndex; pl.variant = v; pl.bend = bend; pl.brake = brakeAt; pl.end = endPos;
-                pl.ducked = ducked;
+                pl.ducked = ducked; pl.lift = lift;
             };
             for (int i = i0; i < runTicks || (pending >= 0 && i < maxTicks); i++)
             {
@@ -1733,27 +1748,35 @@ static void EdgeBugPost(void* pLocal, UserCmd_t* pCmd)
                 {
                     if (EntI(pLocal, g_offFlags) & FL_ONGROUND) { contactTick = i + 1; contactZ = EntV3(pLocal, g_offOrigin).z; }
                     else if (const float vzNow = EntV3(pLocal, g_offVelocity).z;
-                             vzNow <= 0.f && (mode != 2 || roundf(vzNow) == roundf(pendingVz - 2.f * g)))
-                        latch(pending, pendingPos, pendingDucked);
+                             vzNow <= 0.f && (esurf || mode != 2 || roundf(vzNow) == roundf(pendingVz - 2.f * g)))
+                        latch(pending, pendingPos, pendingDucked, pendingLift);
                     pending = -1;
                     break;
                 }
                 const Vec3 velNow = EntV3(pLocal, g_offVelocity);
                 const int flNow = EntI(pLocal, g_offFlags);
-                if (EbCheck(pLocal, searchVelBackup.z, velNow.z, g, (flNow & FL_ONGROUND) != 0, mode))
+                /* edgesurf on eb ( botox :1163 ): only the exact feet pin at an edge top. lift = the takeover's air duck goes in.
+                   CSS has no duck timer ( Duck() :860 finishes an air duck the tick it is pressed ): no duck date, only the bug
+                   tick's own cmd must not press it ( botox last_duck < i ). "falling at all" ~ one gravity step: per-tick ( scales ) */
+                bool lift = false;
+                const bool bugTick = esurf ? searchVelBackup.z < -6.f * EbScale() && ESurf_EbEnd(pLocal, lift)
+                                           : EbCheck(pLocal, searchVelBackup.z, velNow.z, g, (flNow & FL_ONGROUND) != 0, mode);
+                lift = lift && !(s_ebRun[i].buttons & IN_DUCK);
+                if (bugTick)
                 {
                     // ramp scrape, not a lip: drop the candidate, run keeps falling (the real lip is
                     // usually a few ticks down). s_ebRun[i].origin + searchVelBackup = tick i pre-sim
                     const bool bugDuck = (flNow & FL_DUCKING) != 0;
                     if (!MV_EbStanceOk(stance, bugDuck)) nStance++;   // botox stance_rej: run keeps falling
                     else if (!EbSurfaceUsable(pLocal, s_ebRun[i].origin, searchVelBackup)) nRejSurf++;
-                    else if (i + 1 >= maxTicks) { latch(i, EntV3(pLocal, g_offOrigin), (flNow & FL_DUCKING) != 0); break; }
+                    else if (i + 1 >= maxTicks) { latch(i, EntV3(pLocal, g_offOrigin), (flNow & FL_DUCKING) != 0, lift); break; }
                     else
                     {
                         pending = i;
                         pendingPos = EntV3(pLocal, g_offOrigin);
                         pendingVz = velNow.z;
                         pendingDucked = (flNow & FL_DUCKING) != 0;
+                        pendingLift = lift;
                     }
                 }
                 searchVelBackup = velNow;
@@ -1762,7 +1785,7 @@ static void EdgeBugPost(void* pLocal, UserCmd_t* pCmd)
                     && EbFirstReachTick(pLocal, hull, EntV3(pLocal, g_offOrigin), searchVelBackup, runTicks - i - 1) < 0)
                 { tailCut += runTicks - i - 1; break; }
             }
-            if (!runFound && pending >= 0) latch(pending, pendingPos, pendingDucked);
+            if (!runFound && pending >= 0) latch(pending, pendingPos, pendingDucked, pendingLift);
             lastRunFound = runFound;
             if (const long long spent = budget.UsedUs() - runStarted; spent > worstRunUs) worstRunUs = spent;
         };
@@ -1969,15 +1992,31 @@ static void EdgeBugPost(void* pLocal, UserCmd_t* pCmd)
 
         // pick: heading closest to where the mouse turns (aim = view + half the turn over its flight)
         auto aimAt = [&](int ticks) { return origView.y + std::clamp(delta.y * (ticks + 1) * 0.5f, -90.f, 90.f); };
+        /* eb -> esurf ( edgesurf.inl, botox :1454 ): with the edge surf key down a bug that ducks has to head 4 deg closer than one
+           that never does to win: only a standing end has the air duck lift that makes the same ledge an edge surf */
+        const float duckCost = ESurf_Armed() ? 4.f : 0.f;
+        const auto ducks = [](const EbCmd_t* c, int ticks, bool endDuck) {
+            return endDuck || std::any_of(c, c + ticks + 1, [](const EbCmd_t& e) { return (e.buttons & IN_DUCK) != 0; });
+        };
+        if (esurf && s_ebPlanCount == 0 && s_ebFallbackOk)
+        {
+            s_ebPlans[0]  = s_ebFallback;
+            s_ebPlanCount = 1;
+        }
         float err[k_ebPlanMax];
         for (int p = 0; p < s_ebPlanCount; p++)
-            err[p] = EbAimErr(s_ebPlans[p].cmds[0].origin, s_ebPlans[p].end, aimAt(s_ebPlans[p].ticks));
+            err[p] = EbAimErr(s_ebPlans[p].cmds[0].origin, s_ebPlans[p].end, aimAt(s_ebPlans[p].ticks))
+                   + (esurf && !s_ebPlans[p].lift ? 360.f : 0.f)
+                   + (ducks(s_ebPlans[p].cmds, s_ebPlans[p].ticks, s_ebPlans[p].ducked) ? duckCost : 0.f);
         int sel = MV_EbPickPlan(err, s_ebPlanCount);
         if (replan && sel >= 0)
         {
             const float curErr = EbAimErr(s_ebCmds[std::min(s_ebCurrentTick, s_ebLockTicks)].origin, s_ebFollowEnd,
-                                          aimAt(s_ebLockTicks - s_ebCurrentTick));
-            const bool keep = MV_EbKeepPlan(curErr, err[sel]);
+                                          aimAt(s_ebLockTicks - s_ebCurrentTick))
+                               + (esurf && !s_ebLastLift ? 360.f : 0.f)
+                               + (ducks(s_ebCmds, s_ebLockTicks, s_ebLastDuck) ? duckCost : 0.f);
+            // botox :1479: a replan that only looked for a lift keeps the held plan unless the find has one
+            const bool keep = MV_EbKeepPlan(curErr, err[sel]) || (esurf && !steer && !s_ebPlans[sel].lift);
             DebugLog("EB: replan %s at %d/%d best=%.1f cur=%.1f of %d steer=%.2f",
                      keep ? "keep" : "swap", s_ebCurrentTick, s_ebLockTicks, err[sel], curErr, s_ebPlanCount, delta.y);
             if (keep) sel = -1;
@@ -1993,6 +2032,8 @@ static void EdgeBugPost(void* pLocal, UserCmd_t* pCmd)
             s_ebFollowEnd = pl.end;
             s_ebLastVariant = pl.variant;
             s_ebLastBend = pl.bend;
+            s_ebLastLift = pl.lift;
+            s_ebLastDuck = pl.ducked;
             if (g_edgeBugViz)
             {
                 static Vec3 pts[k_ebMaxTicks + 1];
@@ -2022,6 +2063,10 @@ static void EdgeBugPost(void* pLocal, UserCmd_t* pCmd)
                  sel >= 0 ? (s_ebPlans[sel].ducked ? 1 : 0) : -1, sel >= 0 ? s_ebPlans[sel].bend : 0.f,
                  famSaves, famResumes, famSkipped, Pred_SnapUs() - snapUs0,
                  bendResumes, bendSkipped, deepFull ? 1 : 0, bendStart, nSlow);
+        if (esurf)
+            DebugLog("EB: esurf plans=%d lifts=%d pick=%d", s_ebPlanCount,
+                     (int)std::count_if(s_ebPlans, s_ebPlans + s_ebPlanCount, [](const EbPlan_t& p) { return p.lift; }),
+                     s_ebDetected ? (s_ebLastLift ? 1 : 0) : -1);
     } while (false);
 
     if (s_ebDetected)

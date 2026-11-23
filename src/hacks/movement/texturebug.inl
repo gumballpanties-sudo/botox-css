@@ -410,7 +410,7 @@ static void TextureBug(void* pLocal, UserCmd_t* pCmd)
 {
     const auto noteSent = [&]() {
         s_tbSentCmd = -1;
-        if (s_tbSimsThisCmd > 0)
+        if (s_tbSimsThisCmd > 0 || s_esurfRestored)   // edge surf's restore alone left the entity on START
         {
             RestoreToFrame(PredCommandsPredicted() - 1);
             Pred_Simulate(pLocal, pCmd);
@@ -419,6 +419,20 @@ static void TextureBug(void* pLocal, UserCmd_t* pCmd)
         }
     };
     s_tbSimsThisCmd = 0;
+    s_esurfRestored = false;
+    // edge surf first ( botox texturebug.cpp:173 ), any TB key: when it owns the cmd both tb engines + head bounce stay out,
+    // noteSent resims it ( its sims bump s_tbSimsThisCmd )
+    {
+        bool esPin = false, esHeld = false;
+        if (ESurf_Online(pLocal, pCmd, esPin, esHeld))
+        {
+            // its pin is a head pin: wall climb / pixel surf / edgebug read it off these like tb's own
+            s_textureBugHit = esPin;
+            s_tbOwnsCmd     = true;
+            noteSent();
+            return;
+        }
+    }
     // TB key = ref engine first (wallengine.inl, ref , then the botox engine below on a
     // miss. A pin needs the hull ~1 ulp off the face AND a press of dx in [gap, (eps-gap)*dz/(H+eps)]
     // (~8e-5u at hold, botox texturebug.cpp:346/816). ref's fixed wish grid only ever sends "closest gap",
@@ -1078,7 +1092,8 @@ static void HeadSurf(void* pLocal, UserCmd_t* pCmd)
     s_hs_surf_ticks = s_headSurfHit ? s_hs_surf_ticks + 1 : 0;
     s_headSurfHit = false;
 
-    if (!On(g_textureBug, g_textureBugKey, g_textureBugMode) || !pCmd || !EntAlive(pLocal))
+    // edge surf owns this cmd ( its pin sets tb's hit ): a ceiling take over here would replace its proven move
+    if (!On(g_textureBug, g_textureBugKey, g_textureBugMode) || !pCmd || !EntAlive(pLocal) || s_esurfActive)
         { s_hs_locked = false; s_hs_cached_forward = -1.f; s_hs_coast_left = 0; return; }
 
     // TB caught a wall surf this tick. Do NOT hard-return: if a ceiling is in reach and the pin
@@ -1422,7 +1437,7 @@ static void HeadBounce(void* pLocal, UserCmd_t* pCmd)
     if (!On(g_textureBug, g_textureBugKey, g_textureBugMode)) return;
     if (!pCmd || !EntAlive(pLocal)) return;
     // a wall pin or a ceiling ride already owns the tick -- both outrank a one-tick clip
-    if (s_textureBugHit || s_headSurfHit) return;
+    if (s_textureBugHit || s_headSurfHit || s_esurfActive) return;   // edge surf: its guide sets no hit
     // botox head_bounce: gate + start_pos + vz off backup_data (cmd START), never the predicted END
     if (s_prePredFlags & FL_ONGROUND) return;
     if (EntMoveType(pLocal) != MOVETYPE_WALK) return;

@@ -59,6 +59,18 @@ inline bool DetFresh(bool now, int& off)
     return f;
 }
 
+// botox run_detections edge surf: phys = this START pinned and the last cmd sent a proven edge surf pin, held = edge surf owned
+// the last cmd ( its approach ). One print an approach: owned ticks keep the gap counter at 0, so the air duck lift's second pin
+// is the same surf. 1 = fired ( 125 + "edgesurfed" ), 2 = a ride tick ( 25 ), 0 = nothing
+struct DetEs { int off = 1 << 30; bool fired = false; };
+inline int DetEsStep(DetEs& s, bool phys, bool held, int gapTicks = 8)
+{
+    if (phys || held) s.off = 0;
+    else if (s.off < (1 << 30) && ++s.off >= gapTicks) s.fired = false;
+    if (phys && !s.fired) { s.fired = true; return 1; }
+    return phys ? 2 : 0;
+}
+
 // botox push_notice pick_prefix, random mode: row index to print, -1 = none. Never the same text
 // as `last` while another non-empty row exists (empty rows skipped). r = any random number.
 // count <= rows in the array ( NameList: kMaxNames ).

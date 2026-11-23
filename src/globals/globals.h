@@ -930,6 +930,7 @@ extern int  g_offViewOffset;    // m_vecViewOffset[0] -- eye pos (PS finder/assi
 extern int  g_offItemDefIndex;  // m_iItemDefinitionIndex (DT_EconEntity) -- Atomizer detect
 extern int  g_offTeamNum;       // m_iTeamNum -- friendly team brushes are not solid to us
 extern int  g_offCollGroup;     // m_CollisionGroup -- solid-to-player-movement objects still are
+extern int  g_offSolidType;     // m_nSolidType (byte, m_Collision) -- SOLID_BSP 1 / SOLID_VPHYSICS 6 (edge surf)
 extern int  g_offSkyArea;       // m_Local.m_skybox3d.area -- 3D skybox BSP area, 255 = none
 // The interp-removal netvars that used to sit here (m_flSimulationTime, m_flOldSimulationTime,
 // m_iObserverMode, m_hObserverTarget, m_PlayerAnimState, m_flTauntYaw, m_bAllowMoveDuringTaunt,

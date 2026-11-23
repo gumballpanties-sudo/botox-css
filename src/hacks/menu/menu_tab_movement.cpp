@@ -197,6 +197,7 @@ static void Page_MovementMain()
                     static const char* const kEbTypes[] = { "ducked", "standing" };
                     if (!g_edgeBugCurStance)
                         ImGui::MultiCombo("stance##ebtypes", &g_edgeBugStance, kEbTypes, 2);
+                    ImGui::Checkbox("edgesurf on eb##ebesurf", &g_edgeBugEdgeSurf);   // botox :530
                     ImGui::Checkbox("autostrafe to edge", &g_edgeBugToEdge);
                     if (g_edgeBugToEdge)
                     {
@@ -269,6 +270,23 @@ static void Page_MovementMain()
             }, ImVec2(220.f, -1));
 
         // "auto align" moved to the "other" group (botox :877-883)
+
+        // botox :652-669. real movement, any server: surf a ledge's top edge from beside it
+        ImGui::Checkbox("edge surf", &g_edgeSurf);
+        if (g_edgeSurf)
+            ImGui::OptionPopup("edge surf settings", [&]() {
+                ImGui::Label("edge surf keybind");
+                ImGui::Keybind("edge surf key", &g_edgeSurfKey, &g_edgeSurfMode);
+                SliderF("reach##esurfreach", &g_edgeSurfReach, 0.1f, 32.f, "%.1f u");
+                SliderF("lead range##esurfrange", &g_edgeSurfRange, 8.f, 512.f, "%.0f u");
+                // 0 = straight press into the wall, else air strafe toward it turning this many degrees a tick
+                SliderF("delta strafe##esurfdelta", &g_edgeSurfDeltaStrafe, 0.f, 15.f, "%.2f");
+                ImGui::Checkbox("visualize##esurfviz", &g_edgeSurfViz);
+                ImGui::ColorEdit4("visualize color##esurfvizcolor", g_edgeSurfVizColor,
+                    ImGuiColorEditFlags_AlphaBar | ImGuiColorEditFlags_AlphaPreviewHalf | ImGuiColorEditFlags_NoOptions |
+                    ImGuiColorEditFlags_InputRGB | ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoTooltip |
+                    ImGuiColorEditFlags_NoDragDrop | ImGuiColorEditFlags_PickerHueBar | ImGuiColorEditFlags_NoBorder);
+            }, ImVec2(220.f, -1));
 
         ImGui::Checkbox("pixel surf", &g_pixelSurf);
         if (g_pixelSurf)

@@ -336,7 +336,7 @@ void UnitB_Menu_movement_detections()
     ImGui::Checkbox("detections", &g_detections);
     if (g_detections)
         ImGui::OptionPopup("detection settings", [&]() {
-            static const char* const kTypes[DET_MAX] = { "edgebug", "texturebug", "airstuck", "pixelsurf", "wallclimb" };
+            static const char* const kTypes[DET_MAX] = { "edgebug", "texturebug", "airstuck", "pixelsurf", "wallclimb", "edgesurf" };
             ImGui::MultiCombo("detections", &g_detectionTypes, kTypes, DET_MAX);
             ImGui::Checkbox("stack edgebugs##detstack", &g_detectionStackEb);
             ImGui::InputText("chat label##detlabel", g_detectionLabel, sizeof(g_detectionLabel));

@@ -19,7 +19,8 @@ namespace
     std::atomic<unsigned> s_events{ 0 };
 
     // botox readout: one row per trick this combo. rows + s_total change together under the lock
-    constexpr const char* kRowNames[] = { "edgebug", "fireman", "jumpbug", "headbounce", "pixelsurf", "texturebug", "airstuck", "wallclimb" };
+    constexpr const char* kRowNames[] = { "edgebug", "fireman", "jumpbug", "headbounce", "pixelsurf", "texturebug", "airstuck", "wallclimb",
+                                          "edgesurf" };
     static_assert(std::size(kRowNames) == PTS_PIXEL_SURF_RIDE, "readout name per trick");
 
     struct ReadoutRow
@@ -92,10 +93,10 @@ void Points_OnTrick(int trick)
 {
     g_wmTrickMs.store(GetTickCount64());   // unit wm: botox points_on_trick g_trick_time (dna / lumi watermark glow)
     if (trick >= 0 && trick < PTS_PIXEL_SURF_RIDE) g_trickFired[trick].fetch_add(1);
-    if (!g_ptsEnable || g_showMenu || trick < 0 || trick > PTS_WALL_CLIMB_RIDE) return;
+    if (!g_ptsEnable || g_showMenu || trick < 0 || trick > PTS_EDGE_SURF_RIDE) return;
 
     constexpr int kHeldFirst = PTS_PIXEL_SURF, kRideFirst = PTS_PIXEL_SURF_RIDE;
-    static_assert(PTS_WALL_CLIMB_RIDE - kRideFirst == kRideFirst - 1 - kHeldFirst, "held / ride blocks out of step");
+    static_assert(PTS_EDGE_SURF_RIDE - kRideFirst == kRideFirst - 1 - kHeldFirst, "held / ride blocks out of step");
     static float nextRideBonus[kRideFirst - kHeldFirst] = {};
     const float now = Now();
 

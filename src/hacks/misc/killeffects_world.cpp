@@ -1180,7 +1180,7 @@ static void ClipBuild(ImDrawList* dl, const float (*m)[4])
             bool ok = n >= 3;
             for (int i = 0; i < n && ok; ++i)
                 ok = ClipProject(view, d.at + (d.u * unit[i][0] + d.v * unit[i][1]) * world, pts[i], ignore);
-            if (ok) n_particle_shape::fill_screen(dl, s, pts, n, Col(col, d.alpha));
+            if (ok) n_particle_shape::fill_screen(dl, s, pts, n, Col(col, d.alpha), shape);
         }
         else if (shape) n_particle_shape::fill(dl, s, tip, d.spin, Col(col, d.alpha), shape);
         else dl->AddCircleFilled(s, r, Col(col, d.alpha));   // auto segments by radius

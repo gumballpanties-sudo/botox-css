@@ -187,10 +187,13 @@ static void WallClimb(void* pLocal, UserCmd_t* pCmd)
     // yields. TB / HS / HB catches, AS pins (AS outranks WC, coldtires order), a running tb ride, EB's cmd, every PS owner:
     // the assist arc flies beside the very wall this sweeps and a win would overwrite its catch duck / steer. Pixel hop
     // ran first this cmd (ref order). A bare pin (s_psRidingNow) is NOT a yield in CSS: see the pin search below
-    if (s_textureBugHit || s_headSurfHit || s_headBounceHit || s_airStuckHit || s_asHolding || s_ebDetected
+    // edge surf: its approach / fall back over a ledge top is not a climb (botox wall_climb.cpp:386 latch; CSS runs wc after
+    // tb, so this cmd's edge surf too)
+    const bool esurf = ESurf_Latched(pCmd) || s_esurfActive;
+    if (s_textureBugHit || s_headSurfHit || s_headBounceHit || s_airStuckHit || s_asHolding || s_ebDetected || esurf
         || (On(g_textureBug, g_textureBugKey, g_textureBugMode) && s_tbRideHold > 0)
         || s_psAssistHopActive || s_shouldPixelSurf || s_psAssistDuckHeld || s_pixelHopHit) {
-        plan_why = s_textureBugHit ? "tb" : s_headSurfHit ? "hs" : s_headBounceHit ? "hb" : s_airStuckHit || s_asHolding ? "as"
+        plan_why = esurf ? "esurf" : s_textureBugHit ? "tb" : s_headSurfHit ? "hs" : s_headBounceHit ? "hb" : s_airStuckHit || s_asHolding ? "as"
                  : s_ebDetected ? "eb" : s_pixelHopHit ? "ph" : (s_psAssistHopActive || s_shouldPixelSurf || s_psAssistDuckHeld) ? "ps" : "tbride";
         return;
     }

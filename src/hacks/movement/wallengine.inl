@@ -560,7 +560,8 @@ static void WePixelHop(void* pLocal, UserCmd_t* cmd)
     }
     s_wePhSent.cmd = -1;
     // ref 18000c0b0: the TB key wins (PH never runs with it); ref 180016480: ladder / noclip drop the plan
-    if (!key || On(g_textureBug, g_textureBugKey, g_textureBugMode) || WeOnLadderOrNoclip(pLocal))
+    // edge surf owns this cmd ( TextureBug ran it first ): its proven move, like the TB key, wins
+    if (!key || On(g_textureBug, g_textureBugKey, g_textureBugMode) || WeOnLadderOrNoclip(pLocal) || s_esurfActive)
     {
         s_pixelHopOn = false;
         s_wePh.armed = false;

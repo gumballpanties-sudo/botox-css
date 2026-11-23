@@ -3,7 +3,7 @@
 
 // Detections, botox csgo 1:1: a performed trick prints "<label> | edgebugged" to chat, label in
 // the accent color. Types bitmask in botox e_detection_types order (all off by default, as botox).
-enum DetType { DET_EB, DET_TB, DET_AS, DET_PS, DET_WC, DET_MAX };
+enum DetType { DET_EB, DET_TB, DET_AS, DET_PS, DET_WC, DET_ESURF, DET_MAX };   // edge surf appended: cfg bits stay
 inline bool g_detections       = false;
 inline int  g_detectionTypes   = 0;        // bit i = DetType i
 inline bool g_detectionStackEb = false;
@@ -24,6 +24,9 @@ struct DetTick
     int   tick = 0;
     bool  tb = false, as = false, ps = false, wc = false;
     bool  tbOwns = false;   // TB steered the cmd without a hit (park/hold) -- EB veto only
+    // edge surf ( botox es_phys ): esPhys = START pinned + last cmd sent a proven pin, esHeld = it owned the last cmd,
+    // esVeto = an edge surf pin this cmd or the last: never an edgebug too
+    bool  esPhys = false, esHeld = false, esVeto = false;
 
 };
 void Detections_Tick(const DetTick& t);

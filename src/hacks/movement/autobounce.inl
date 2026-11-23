@@ -1240,6 +1240,7 @@ static void AutoBounceRun(void* pLocal, UserCmd_t* cmd, bool yield)
 static void AutoBounce(void* pLocal, UserCmd_t* pCmd)
 {
     const bool yield = s_textureBugHit || s_headSurfHit || s_headBounceHit || s_airStuckHit || s_wallClimbHit
-                    || s_psAssistHopActive || s_shouldPixelSurf || s_psRidingNow || s_pixelHopHit;
+                    || s_psAssistHopActive || s_shouldPixelSurf || s_psRidingNow || s_pixelHopHit
+                    || s_esurfActive;   // botox movement.cpp:1293 g_texturebug.m_owns_cmd: edge surf owns tb's cmd
     AutoBounceRun(pLocal, pCmd, yield);
 }

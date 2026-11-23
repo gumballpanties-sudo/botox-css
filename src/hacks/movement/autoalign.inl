@@ -543,6 +543,9 @@ static void AutoAlignBotox(void* pLocal, UserCmd_t* cmd)
                       && s_prePredVel.Length2D() >= k_holdMinXY;
     s_prevHave = true; s_prevGround = ground; s_prevVz = s_prePredVel.z;
 
+    // botox auto_align.cpp:568: edge surf runs its own align on the ledge it owns (arrival gap in ulps): a flush park / pin
+    // search / bounce here only moves it
+    if (ESurf_Latched(cmd)) { HoldRelease("esurf"); FlushDrop(); return; }
     // the PS assist's seam press reproduces PixelFinder's probe -- AA must not overwrite it
     if (s_psAssistPressIn) { HoldRelease("psassist"); return; }
     const int mt = EntMoveType(pLocal);

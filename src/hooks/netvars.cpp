@@ -154,6 +154,7 @@ int g_offViewOffset    = 0;  // m_vecViewOffset[0] (DT_BasePlayer localdata) -- 
 int g_offItemDefIndex  = 0;  // m_iItemDefinitionIndex (DT_EconEntity m_AttributeManager.m_Item) -- Atomizer detect
 int g_offTeamNum       = 0;  // m_iTeamNum (DT_BaseEntity) -- team brush pass-through in the trace filter
 int g_offCollGroup     = 0;  // m_CollisionGroup (DT_BaseEntity) -- buildings stay solid to both teams
+int g_offSolidType     = 0;  // m_nSolidType (DT_BaseEntity m_Collision, byte) -- edge surf: brush entity (1) vs vphysics (6)
 int g_offSkyArea       = 0;  // m_Local.m_skybox3d.area (DT_Local, int, 255 = no 3D sky) -- map scan skips it
 // m_flSimulationTime / m_iObserverMode / m_hObserverTarget / m_flDuckJumpTime were resolved here
 // and read by nothing but the DebugLog below. Three belonged to the deleted interp removal; the
@@ -202,6 +203,7 @@ void Movement_ResolveExtraNetvars()
     g_offItemDefIndex  = find(FindNetworkTable("DT_EconEntity"), "m_iItemDefinitionIndex");
     g_offTeamNum       = find(pBase, "m_iTeamNum");
     g_offCollGroup     = find(pBase, "m_CollisionGroup");
+    g_offSolidType     = find(pBase, "m_nSolidType");
     g_offSkyArea       = find(pCSPlayer, "m_skybox3d.area");   // generic CPlayerLocalData prop
 
     s_done = true;

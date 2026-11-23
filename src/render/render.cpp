@@ -22,6 +22,7 @@
 #include "../hacks/movement/recorder.h"      // unit B
 #include "../hacks/movement/ps_lines.h"      // unit B (vars only, draw loop appended into RenderPsOverlay below)
 #include "../hacks/menu/cfg/u_mvps.h"         // PSPORT: g_psFinderPixelsurf (pixel finder "pixelsurfs" gate)
+#include "../hacks/menu/cfg/u_movx.h"         // edge surf visualize vars
 #include "../hacks/movement/points_style.h"  // movement > points page look (botox points_ui.cpp styles)
 #include "../hacks/lua/lua.h"                // g_lua.on_paint -- lua render callbacks draw with every other overlay
 #include "../hacks/screen/screenfx_passes.h"   // unit D: sharpen/grain/vignette/invert/posterize/deband/channel-shift/emphasize/show-depth
@@ -900,6 +901,66 @@ static void RenderWallClimbOverlay()
         snprintf(buf, sizeof(buf), "+%.0f", d.land.z - d.groundZ);
         label(d.land + Vec3(0.f, 0.f, 8.f), buf, green);
     }
+}
+
+// ==== edge surf overlay (botox edge_surf_render) =================================================
+// every ledge the scan found (dim), the pick (your color while edge surf owns the cmd, green on a pin, grey once it let go),
+// the arrival point on the crossing tick, the act. A hull wide stretch of the edge, not the ledge's real length.
+// Gate = the visualize var alone: "edgesurf on eb" runs edge surf with its own toggle off
+static void RenderEdgeSurfOverlay()
+{
+    if (!g_edgeSurfViz) return;
+    if (!g_engine || !IsInGame()) return;
+
+    static ESurfDrawData d;
+    ESurf_GetDrawData(d);
+    if (!d.ms || GetTickCount64() - d.ms > 150ull) return;   // botox: 0.15 s after the last tick edge surf ran
+
+    const float(*m)[4] = PsW2SMatrix();
+    if (!m) return;
+
+    ImGuiIO& io = ImGui::GetIO();
+    ImDrawList* dl = ImGui::GetBackgroundDrawList();
+    const float W = io.DisplaySize.x, H = io.DisplaySize.y;
+    auto W2S = [&](const Vec3& v, ImVec2& out) -> bool
+    {
+        const float w = m[3][0] * v.x + m[3][1] * v.y + m[3][2] * v.z + m[3][3];
+        if (w <= 0.001f) return false;
+        const float inv = 1.f / w;
+        out.x = W * 0.5f + (m[0][0] * v.x + m[0][1] * v.y + m[0][2] * v.z + m[0][3]) * inv * W * 0.5f;
+        out.y = H * 0.5f - (m[1][0] * v.x + m[1][1] * v.y + m[1][2] * v.z + m[1][3]) * inv * H * 0.5f;
+        return true;
+    };
+    auto line = [&](const Vec3& a, const Vec3& b, ImU32 col, float w) {
+        ImVec2 sa, sb;
+        if (W2S(a, sa) && W2S(b, sb)) dl->AddLine(sa, sb, col, w);
+    };
+    const Vec3 drop(0.f, 0.f, 8.f);
+    auto edge = [&](const ESurfDrawData::Edge& e, ImU32 col, float w) {
+        line(e.a, e.b, col, w);
+        line(e.a, e.a - drop, col, 1.f);
+        line(e.b, e.b - drop, col, 1.f);
+    };
+
+    const float* c = g_edgeSurfVizColor;
+    const ImU32 dim = ImGui::ColorConvertFloat4ToU32(ImVec4(c[0], c[1], c[2], c[3] * 0.35f));
+    for (int i = 0; i < d.nCand; i++) edge(d.cand[i], dim, 1.f);
+    if (!d.pickOk) return;
+    const ImU32 pick = d.pinned ? IM_COL32(90, 255, 120, 255)
+                     : d.own    ? ImGui::ColorConvertFloat4ToU32(ImVec4(c[0], c[1], c[2], c[3]))
+                                : IM_COL32(160, 160, 160, 200);
+    edge(d.pick, pick, 2.f);
+    if (ImVec2 sp; d.arriveOk && W2S(d.arrive, sp)) dl->AddCircleFilled(sp, 3.f, pick, 12);
+
+    ImFont* font = g_menuReg ? g_menuReg : ImGui::GetFont();   // botox verdana 11
+    ImVec2 sm;
+    if (!font || !W2S(d.label, sm)) return;
+    char buf[32];
+    snprintf(buf, sizeof(buf), "esurf %c%s", d.act, d.pinned ? " pin" : "");
+    const float fs = font->FontSize;
+    const ImVec2 at(floorf(sm.x - font->CalcTextSizeA(fs, FLT_MAX, 0.f, buf).x * 0.5f), floorf(sm.y - fs));
+    dl->AddText(font, fs, ImVec2(at.x + 1.f, at.y + 1.f), IM_COL32(0, 0, 0, 200), buf);   // botox text_flag_dropshadow
+    dl->AddText(font, fs, at, pick, buf);
 }
 
 // ==== route + pixel calculator overlay ===========================================================
@@ -2116,6 +2177,7 @@ static void BuildImGuiFrame()
     RenderEdgeBugOverlay();
     RenderAutoBounceOverlay();
     RenderWallClimbOverlay();
+    RenderEdgeSurfOverlay();
     DistCalc_Render();
     FloorLevel_Render();   // check floor level readout text, same contract as DistCalc_Render
     // unit screen: AspectStretch_Run = botox aspect ratio "stretch cheat overlays" / "stretch

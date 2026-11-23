@@ -207,6 +207,7 @@ struct MvInd_t
     // botox keybind indicator rows with no landing state (plain labels), and the two that have one
     bool  dhOn = false, acOn = false, abOn = false, hswOn = false;
     bool  esOn = false, esHit = false;       // edge skip: hit = a plan is flying (botox g_edge_skip.active())
+    bool  esfOn = false, esfHit = false;     // edge surf: hit = its pin (tb's hit) or it holds / guides the cmd (botox label_esurf)
     // ladder unit (CS:GO csgo-sdk port): fr = fireman ("fr" key, same label as botox CS:GO),
     // hit = grab+jump pressed this tick. alOn/alHit = anti_ladder stuck-escape.
     bool  frOn = false, frHit = false;
@@ -298,6 +299,24 @@ struct AbDrawData
     bool active = false;
 };
 void AB_GetDrawData(AbDrawData& out);
+
+// ==== edge surf visualize (movement thread -> render thread), botox edge_surf_render ====
+// every ledge the scan found (dim), the pick (your color while edge surf owns the cmd, green on a pin, grey once it let go),
+// the arrival point, the act. A hull wide stretch of each edge, not the ledge's real length. ms = GetTickCount64 of the tick
+// that ran it: botox draws for 0.15 s after
+struct ESurfDrawData
+{
+    static constexpr int k_max = 10;
+    struct Edge { Vec3 a, b; };   // the top's stretch; ticks run 8u down from both ends
+    Edge cand[k_max];
+    int  nCand = 0;
+    Edge pick;
+    Vec3 arrive, label;
+    bool pickOk = false, arriveOk = false, pinned = false, own = false;
+    char act = 'N';
+    unsigned long long ms = 0;
+};
+void ESurf_GetDrawData(ESurfDrawData& out);
 
 // ==== wall climb visualize (movement thread -> render thread), botox wall_climb viz_t + spot job ====
 // last wall tick: the face wc read, where the sent cmd takes you ( lands = over your jump floor ), on ground the spot scan

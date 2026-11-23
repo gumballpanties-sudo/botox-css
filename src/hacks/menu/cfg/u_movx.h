@@ -21,3 +21,15 @@ inline float g_edgeBugLobStrafeAngle = 0.f;    // deg, 1-179: "is this turn too 
 inline int   g_edgeBugLobDeltaType  = 0;       // 0 1x / 1 0.8x / 2 0.5x / 3 0.25x -- scales the view delta carried between cmds
 inline int   g_edgeBugLobTicks      = 1;       // 0-126: ticks replayed per search variant
 inline float g_edgeBugLobLock       = 0.f;     // 0-10: mouse-scale strength while a lob plan is flying
+
+// ---- edge surf: botox edge_surf.cpp (movement/edgesurf.inl), defaults = botox variables.h:1386 + 1440-1446.
+// real movement, any server: surf a ledge's top edge from beside it
+inline bool  g_edgeSurf = false;
+inline int   g_edgeSurfKey = 0;
+inline int   g_edgeSurfMode = 1;
+inline float g_edgeSurfRange = 96.f;         // lead range: ledges scanned under the fall (8-512)
+inline float g_edgeSurfReach = 6.f;          // reach: a beside approach owned inside this gap (0.1-32)
+inline float g_edgeSurfDeltaStrafe = 0.f;    // 0 = straight press into the face, else air strafe turning this many deg a tick
+inline bool  g_edgeSurfViz = false;          // scanned ledges, the pick, the arrival, the act
+inline float g_edgeSurfVizColor[4] = { 120 / 255.f, 230 / 255.f, 1.f, 1.f };
+inline bool  g_edgeBugEdgeSurf = false;      // edgebug "edgesurf on eb": the eb key arms edge surf's takeover at an eb's pin end

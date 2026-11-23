@@ -116,7 +116,7 @@ static void AS_SyncArm(const bool on)
 
 static void AS_Sync(void* pLocal, UserCmd_t* cmd, const bool armed)
 {
-    AS_SyncArm(armed || s_wcSyncWant || s_tbSyncWant || s_phSyncWant);   // botox sync_arm owners: as + tb + wc (+ ph) ( all sub-ulp: pins are exact floats )
+    AS_SyncArm(armed || s_wcSyncWant || s_tbSyncWant || s_phSyncWant || s_esurfSyncWant);   // botox sync_arm owners: as + tb + wc + es (+ ph) ( all sub-ulp: pins are exact floats )
 
     struct rec_t {
         int cmd = -1, tick_base = 0;
@@ -191,7 +191,10 @@ static struct
 static void AirStuck(void* pLocal, UserCmd_t* cmd)
 {
     s_asHolding = false;
-    const bool on = g_airStuck && MovementKeyOK(g_airStuckKey, g_airStuckMode) && EntAlive(pLocal);
+    /* an edge surf feet approach owns this fall ( botox air_stuck.cpp:323 latch ): a hug / park toward its face over the top lands
+       you on it. CSS runs AS after TB ( botox: before ), so the cmd edge surf owns right now counts too */
+    const bool esurf = ESurf_Latched(cmd) || s_esurfActive;
+    const bool on = g_airStuck && MovementKeyOK(g_airStuckKey, g_airStuckMode) && EntAlive(pLocal) && !esurf;
     AS_Sync(pLocal, cmd, on);
     {
         static int s_sec = -1;
@@ -212,7 +215,7 @@ static void AirStuck(void* pLocal, UserCmd_t* cmd)
     // pixel hop's land is this cmd (ref: ph runs before wall stuck, a land ends the tick)
     if (!on || (s_prePredFlags & FL_ONGROUND) || EntMoveType(pLocal) != MOVETYPE_WALK || s_pixelHopHit)
     {
-        end(!on ? "key" : s_pixelHopHit ? "ph" : "ground");
+        end(esurf ? "esurf" : !on ? "key" : s_pixelHopHit ? "ph" : "ground");
         return;
     }
 
