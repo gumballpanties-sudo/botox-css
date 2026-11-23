@@ -6,7 +6,10 @@
      w.pin_tol  END vz on the pin ( csgo 1e-3; CSS x64 ClipVelocity nudges +1/32 off the plane: -halfgrav + 0.03125 )
      w.duck_dz  air duck / unduck feet shift ( csgo 9 = ( 72 - 54 ) / 2, CSS 8.5 = ( 62 - 45 ) / 2 )
      w.relift( )  an air release now leaves an air duck press for the lift after the pin ( csgo duck speed + 0.4 s timer,
-                CSS: no re-duck limit at all ) */
+                CSS: no re-duck limit at all )
+     w.pin_res  find_pin bisection floor, in face ulps a tick ( csgo 4e-3. the +1/32 clip nudge lifts a ride 0.00047 a tick, its top hit
+                lands at fraction 0.0026: the ride window is 0.0013 ulp wide, 4e-3 stepped over it )
+   NOT csgo: ride_len( ) + its use in tick( )'s pick: the longest ledge first */
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
@@ -358,7 +361,7 @@ namespace n_es
 						hi = c;
 				}
 			}
-			for ( int i = 0; bracket && i < 28 && ( hi - lo ) * w.dt > u * 4e-3f; ++i ) {
+			for ( int i = 0; bracket && i < 28 && ( hi - lo ) * w.dt > u * w.pin_res; ++i ) {
 				if ( w.sims_left( ) <= 0 )
 					return false;
 				const float mid = 0.5f * ( lo + hi );
@@ -535,6 +538,22 @@ namespace n_es
 		e.d = ( t.d - t.n.z * e.top ) / l;
 		out = e;
 		return 1;
+	}
+
+	/* NOT csgo. how far the ledge runs on past the arrival p the way you travel ( dir = sign of the along speed ): its top still under the hull
+	   at the same height, stepped out to 512u. ponytail: top only, 5 samples: a notch between two or a wall beside the face is not seen. sweep
+	   the hull along the face if a picked ride ends early */
+	template < class W >
+	float ride_len( W& w, const edge_t& f, const hull_t& h, const v3& p, const float dir )
+	{
+		float len = 0.f;
+		for ( const float d : { 32.f, 64.f, 128.f, 256.f, 512.f } ) {
+			float t = 0.f;
+			if ( !top_at( w, f, h, mk( p.x - f.n.y * dir * d, p.y + f.n.x * dir * d, p.z ), f.top + 1.f, f.top - 1.f, t ) || fabsf( t - f.top ) >= k_ztol )
+				break;
+			len = d;
+		}
+		return len;
 	}
 
 	/* ledges under the feet within range: 8 yaws + the way you fly, a hull curtain from the feet down the fall. the curtain ends above what lies
@@ -755,7 +774,7 @@ namespace n_es
 		const float auth = w.k_acc * w.max_speed * ( s.duck ? w.crop : 1.f );
 		struct ev_t {
 			int k = -1, score = -1;
-			float f0 = 0.f, g = 0.f, cl = 0.f, u = 0.f, hs = 0.f, v = 0.f, danger = FLT_MAX, qv = 0.f, hk = 0.f, loss = 0.f;
+			float f0 = 0.f, g = 0.f, cl = 0.f, u = 0.f, hs = 0.f, v = 0.f, danger = FLT_MAX, qv = 0.f, hk = 0.f, loss = 0.f, len = 0.f;
 			bool riding = false, mine = false, fly = false, upq = false, flip = false, under = true, alt = false;
 			char act = 'F', qact = 'F';
 		};
@@ -869,8 +888,24 @@ namespace n_es
 				best = i;
 		if ( best >= 0 ) {
 			const int top_cls = best;
-			const auto cls    = [ & ]( const int i ) { return ok[ i ] && ev[ i ].score == ev[ top_cls ].score && ev[ i ].danger == ev[ top_cls ].danger; };
-			float lmin        = FLT_MAX;
+			const auto cls0   = [ & ]( const int i ) { return ok[ i ] && ev[ i ].score == ev[ top_cls ].score && ev[ i ].danger == ev[ top_cls ].danger; };
+			/* NOT csgo: two or more in the class = the longest ride wins, before loss / k / gap. a ledge you cross more than 60 deg off your
+			   travel is no surf ( len 0 ). an owned ledge is its own class ( score ): no swap mid approach */
+			int n_cls = 0;
+			for ( int i = 0; i < nc; ++i )
+				n_cls += cls0( i ) ? 1 : 0;
+			float len_max = 0.f;
+			if ( n_cls > 1 && !riding0 && vxy >= 1.f && ev[ top_cls ].fly )
+				for ( int i = 0; i < nc; ++i ) {
+					const float va = along( c[ i ], s.v );
+					if ( !cls0( i ) || fabsf( va ) < 0.5f * vxy )
+						continue;
+					const float ta = ( static_cast< float >( ev[ i ].k ) + ev[ i ].f0 ) * w.dt;
+					ev[ i ].len    = ride_len( w, c[ i ], h, mk( s.o.x + s.v.x * ta, s.o.y + s.v.y * ta, s.o.z ), va > 0.f ? 1.f : -1.f );
+					len_max        = std::max( len_max, ev[ i ].len );
+				}
+			const auto cls = [ & ]( const int i ) { return cls0( i ) && ( ev[ i ].len >= len_max || ev[ i ].riding || ev[ i ].g <= 0.f ); };
+			float lmin     = FLT_MAX;
 			for ( int i = 0; i < nc; ++i )
 				if ( cls( i ) )
 					lmin = std::min( lmin, ev[ i ].loss );

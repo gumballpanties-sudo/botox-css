@@ -19,7 +19,8 @@
 //   - no duck speed / re-duck timer / air duck count: Duck() :860 finishes an air duck / unduck the tick it is pressed: w.relift
 //     always true, the eb lift needs no duck date.
 //   - CSS x64 ClipVelocity nudges +1/32 off the plane: a pin ENDs at -halfgrav + 0.03125 (memory ref-css-clip-nudge,
-//     cssm::PinnedVz): pin tolerance k_pinTol.
+//     cssm::PinnedVz): pin tolerance k_pinTol. Same nudge lifts a ride 0.00047 a tick: the hold's closing window is
+//     0.0013 face ulp wide: w.pin_res.
 //   - mv->m_flMaxSpeed = min(sv_maxspeed, m_flMaxspeed) (gamemovement.cpp:1155 GetPlayerMaxSpeed, baseplayer_shared.cpp:148)
 //     then min( client max = m_flMaxspeed, IN_SPEED 100 ) (cs_gamemovement.cpp:152-171, prediction.cpp:620). m_flMaxspeed
 //     already carries the weapon ( cs_player.cpp:2164 SetMaxSpeed( pWeapon->GetMaxSpeed( ) ) ). Stamina only slows WalkMove
@@ -141,6 +142,8 @@ struct World
     float dt = 0.015f, pin = -6.f, k_acc = 0.f, max_speed = 250.f;
     // engine knobs (edgesurf_core.h header)
     float crop = k_duckCrop, pin_tol = k_pinTol, duck_dz = 8.5f, scale = 1.f;
+    // nudged ride window = 0.0013 face ulp a tick ( top hit at fraction 0.0026 ), halves when z ulp eats the 0.00047 lift
+    float pin_res = 2.5e-4f;
     bool  debug = false;
     int   sims = 0;
     Filter filter;
@@ -427,6 +430,9 @@ static bool ESurf_Online(void* pLocal, UserCmd_t* cmd, bool& pinned, bool& held)
     w.pin       = pin;
     w.k_acc     = CvarFloat("sv_airaccelerate", 10.f) * w.dt * AsSurfaceFriction(pLocal);
     w.max_speed = MaxSpeed(pLocal, cmd->buttons);
+    /* check line: a nudged pin START carries 0.25 ( server keeps it, Pred_Simulate now too ). 1.00 here = that theory is wrong */
+    if (debug && fresh)
+        DebugLog("ESURF: pin start fr=%.2f", AsSurfaceFriction(pLocal));
     w.debug     = debug;
     w.SetupHull();
     if (w.dt <= 0.f || w.k_acc <= 0.f)
