@@ -89,7 +89,7 @@ static bool s_wcSlopeDown = false;
 // ebanat 0x1054b3: on press, slope of the surface you look at. movement_add_window -> DebugLog
 static void ShowWallSlope(void* pLocal)
 {
-    const bool down  = On(g_showWallSlope, g_showWallSlopeKey, g_showWallSlopeMode);
+    const bool down  = g_showWallSlope && MovementKeyOK(g_showWallSlopeKey, g_showWallSlopeMode);   // tool, not On(): never replay armed (FeatKey)
     const bool press = down && !s_wcSlopeDown;
     s_wcSlopeDown     = down;
     if (!press || !EntAlive(pLocal))

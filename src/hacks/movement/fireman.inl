@@ -633,7 +633,7 @@ static bool FireMan(void* pLocal, UserCmd_t* pCmd)
         s_fm.sideGround = 0;
     const bool lockArmed = g_firemanDropIn && g_firemanDropInLock;
     if (!lockArmed) { s_fm.dropLock = false; s_fm.lockLost = s_fm.lockTicks = 0; }
-    const bool sideOnly = g_firemanSideOnly && MovementKeyOK(g_firemanSideOnlyKey, g_firemanSideOnlyMode);
+    const bool sideOnly = g_firemanSideOnly && FeatKey(g_firemanSideOnlyKey, g_firemanSideOnlyMode);
     if (!sideOnly) s_fm.sideValid = false;
 
     const int nBase = s_predicted ? PredCommandsPredicted() : 0;

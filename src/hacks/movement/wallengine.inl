@@ -543,7 +543,7 @@ static void WePixelHop(void* pLocal, UserCmd_t* cmd)
             s_wePh.nowall = s_wePh.tb = s_wePh.cut = s_wePh.floor = s_wePh.reach = s_wePh.rcut = s_wePh.sims = 0;
         }
     }
-    const bool key = g_pixelHop && MovementKeyOK(g_pixelHopKey, g_pixelHopMode) && EntAlive(pLocal);
+    const bool key = g_pixelHop && FeatKey(g_pixelHopKey, g_pixelHopMode) && EntAlive(pLocal);
     s_phSyncWant = key;   // armed on the key, before the jump: cl_pred_optimize only bites from the next packet
     // last cmd's land: did the engine send what PH proved, and did it ground? took=0 same=1 = sim vs real
     // state differ; same=0 = a writer after PH changed the cmd (d* = what changed)

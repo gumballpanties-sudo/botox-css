@@ -551,7 +551,7 @@ static void AutoAlignBotox(void* pLocal, UserCmd_t* cmd)
     const int mt = EntMoveType(pLocal);
     if (mt == MOVETYPE_LADDER || mt == MOVETYPE_NOCLIP) { HoldRelease("movetype"); return; }
     if (ground) { HoldRelease("ground"); return; }
-    if (g_airStuck && MovementKeyOK(g_airStuckKey, g_airStuckMode) && s_airStuckHit) { HoldRelease("airstuck"); return; }
+    if (g_airStuck && FeatKey(g_airStuckKey, g_airStuckMode) && s_airStuckHit) { HoldRelease("airstuck"); return; }
 
     // per-second diag, botox aa_outs + hold
     const auto Diag = [&]() {

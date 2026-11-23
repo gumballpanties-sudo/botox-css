@@ -219,7 +219,7 @@ static void AirStuck(void* pLocal, UserCmd_t* cmd)
     /* an edge surf feet approach owns this fall ( botox air_stuck.cpp:323 latch ): a hug / park toward its face over the top lands
        you on it. CSS runs AS after TB ( botox: before ), so the cmd edge surf owns right now counts too */
     const bool esurf = ESurf_Latched(cmd) || s_esurfActive;
-    const bool on = g_airStuck && MovementKeyOK(g_airStuckKey, g_airStuckMode) && EntAlive(pLocal) && !esurf;
+    const bool on = g_airStuck && FeatKey(g_airStuckKey, g_airStuckMode) && EntAlive(pLocal) && !esurf;
     AS_Sync(pLocal, cmd, on);
     {
         static int s_sec = -1;

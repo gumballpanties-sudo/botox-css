@@ -323,11 +323,17 @@ static bool s_bindAppActive = true;
 struct BindMemo_t { int key; int mode; bool val; };
 static BindMemo_t s_bindMemo[16] = {};
 static int  s_bindMemoN = 0;
+// recorder live replay: the feature binds that answered true this cmd (vk bitmap) / any at all, always
+// on ones too. A recorded frame stores them (Recorder_CmdEnd), playback answers with them (FeatKey)
+static uint64_t s_featKeys[4] = {};
+static bool     s_featArmed = false;
 
 static void MovementBinds_NewCmd()
 {
     s_bindAppActive = !g_hwnd || GetForegroundWindow() == g_hwnd; // is_active_app gate
     s_bindMemoN = 0;
+    memset(s_featKeys, 0, sizeof(s_featKeys));
+    s_featArmed = false;
 }
 
 static bool BindKeyDown(int key, int mode)
@@ -351,7 +357,22 @@ bool MovementKeyOK(int key, int mode)
         s_bindMemo[s_bindMemoN++] = { key, mode, v };
     return v;
 }
-static bool On(bool enabled, int key, int mode) { return enabled && MovementKeyOK(key, mode); }
+// a movement FEATURE's bind (every On(), + the ones that ask outside it). Under recorder playback the
+// recording answers, not the keyboard: a live frame arms what was armed when it was recorded, any other
+// replayed cmd arms nothing (recorder.h). Action keys + tools (recorder, route calc, practice, ps points,
+// finder, dist calc, floor level, wall slope, fake pov) ask MovementKeyOK: they stay the player's
+static bool FeatKey(int key, int mode)
+{
+    const int play = Recorder_BindPlay(key, mode);
+    const bool v = play >= 0 ? play != 0 : MovementKeyOK(key, mode);
+    if (v)
+    {
+        s_featArmed = true;
+        if (mode == 1 || mode == 2) RecKeySet(s_featKeys, key);
+    }
+    return v;
+}
+static bool On(bool enabled, int key, int mode) { return enabled && FeatKey(key, mode); }
 
 // ==== trace helper ====
 // COLDTIRES 80th -- the trace budget is the REAL tick cost near a wall, not the sims:
@@ -2197,7 +2218,7 @@ static void DistCalc(void* pLocal, UserCmd_t* pCmd)
         if (!s_dc.map.empty() && s_dc.map != level) s_dc = DcState_t{};
     }
     static bool s_prev = false;
-    const bool down  = On(g_distCalc, g_distCalcKey, g_distCalcMode);
+    const bool down  = g_distCalc && MovementKeyOK(g_distCalcKey, g_distCalcMode);   // tool, not On(): never replay armed (FeatKey)
     const bool press = down && !s_prev;
     s_prev = down;
     if (!press || !pCmd || !EntAlive(pLocal)) return;
@@ -2321,7 +2342,7 @@ static void FloorLevel(void* pLocal, UserCmd_t* pCmd)
     }
 
     static bool s_prev = false;
-    const bool down  = On(g_floorLevel, g_floorLevelKey, g_floorLevelMode);
+    const bool down  = g_floorLevel && MovementKeyOK(g_floorLevelKey, g_floorLevelMode);   // tool, not On(): never replay armed (FeatKey)
     const bool press = (down && !s_prev) | s_flClick.exchange(false);
     s_prev = down;
     if (!press || !pCmd || !EntAlive(pLocal)) return;
@@ -2689,7 +2710,7 @@ static void Movement_RunImpl(UserCmd_t* pCmd)
                        || (probesOK && (
                                      // finder: held OR just released (release tick runs the scan),
                                      // plus every later cmd a chunked scan is still running on
-                                        On(g_psFinder, g_psFinderKey, g_psFinderMode)
+                                        (g_psFinder && MovementKeyOK(g_psFinderKey, g_psFinderMode))   // tool, not On(): never replay armed (FeatKey)
                                      || s_psFinderHeld || s_pfBusy
                                      // the whole-map scan is the same scanner on a queue of
                                      // seams, and the REQUEST is in here for the same reason
@@ -2833,8 +2854,9 @@ static void Movement_RunImpl(UserCmd_t* pCmd)
     // edge bug runs AFTER Pred_End (ref: after EnginePrediction.End), probing the
     // ENGINE's predicted frames with its own re-established tick-time window
     // botox: recorder owns cmd = eb post over a desynced replay overwrites recorded duck timing;
-    // and a plan latched by pre would hold the mouse lock, so drop it
-    if (Recorder_OwnsCmd())
+    // and a plan latched by pre would hold the mouse lock, so drop it. A live frame is the features'
+    // (no recorded duck on it: the raw input went on), eb flies it as recorded
+    if (Recorder_PlayState() == 0)
     {
         EbDropPlan("recorder");
         EbDonorReset();
@@ -2990,7 +3012,7 @@ void Movement_Run(UserCmd_t* pCmd)
     }
     // botox records the FINAL cmd: out here so every early return in RunImpl (blocked move,
     // water, taunt) still steps/records. No-op unless RunImpl's Recorder_CmdStart began this cmd.
-    Recorder_CmdEnd(pCmd);
+    Recorder_CmdEnd(pCmd, s_featKeys, s_featArmed);
     // Same reason as g_predWalkSims below, one level worse: a fault between Pred_Start and
     // Pred_End leaves gpGlobals->tickcount / curtime / frametime on the PREDICTION tick, and
     // the engine's CL_Move -> CL_SendMove -> CPrediction::Update run off those three the

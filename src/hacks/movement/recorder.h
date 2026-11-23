@@ -46,10 +46,22 @@ enum RecAction : unsigned
 // ---- game thread (Movement_RunImpl / Movement_Run) ----
 // Start: pLocal null = dead (resets). Captures the player's own input, then lays the replay
 // frame on the cmd so every feature + prediction sees the recorded input.
+// NOT botox, live replay (botox-tf2 11-23): a frame also stores the player's raw input + the feature
+// binds down. Frames a movement feature was armed on / rewrote are "live": playback lays the raw input,
+// feature binds answer as recorded (movement.cpp FeatKey) and the features solve the tick again off the
+// real hull (a pin's recorded presses only fit the recorded position). Every other frame replays the
+// sent cmd bit for bit with all bound features off. Needs the same feature settings as the recording.
+// A clip with no live frame (REC2, or nothing was armed) = the old replay untouched.
 void Recorder_CmdStart(void* pLocal, UserCmd_t* pCmd);
-void Recorder_CmdPrePred(UserCmd_t* pCmd);   // re-lay it: pre features may have rewritten it
-void Recorder_CmdEnd(UserCmd_t* pCmd);       // keys/actions, approach, step, record the final cmd
-bool Recorder_OwnsCmd();                     // playing or walking to the start
+void Recorder_CmdPrePred(UserCmd_t* pCmd);   // re-lay it: pre features may have rewritten it (raw frames)
+// keys/actions, approach, step, record the final cmd. featKeys / featArmed = the feature binds that
+// answered on this cmd (vk bitmap) / any On() at all (movement.cpp FeatKey)
+void Recorder_CmdEnd(UserCmd_t* pCmd, const uint64_t featKeys[4], bool featArmed);
+// lock free, this cmd: -1 no playback, 0 walking to the start / raw frame (replay owns the cmd),
+// 1 live frame (features own the move)
+int  Recorder_PlayState();
+// a feature bind's answer under playback, -1 = ask the keyboard (no playback, or a clip with no live frame)
+int  Recorder_BindPlay(int key, int mode);
 void Recorder_FrameStart();                  // FrameStageNotify FRAME_START: per-frame camera
 void Recorder_MouseInput(float* x, float* y);// OverrideMouseInput: mouse lock
 

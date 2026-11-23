@@ -161,7 +161,7 @@ void FakePov_Tick(float dtRaw)
 {
     enum { mode_right, mode_left, mode_up, mode_bottom, mode_backwards, mode_spinning };
     const float dt = (std::min)(dtRaw, 0.1f);
-    const bool wanted = On(g_fakePov, g_fakePovKey, g_fakePovKeyMode);
+    const bool wanted = g_fakePov && MovementKeyOK(g_fakePovKey, g_fakePovKeyMode);   // tool, not On(): never replay armed (FeatKey)
     float targetPitch = 0.f, targetYaw = 0.f, targetArrow = 0.f, targetLen = 0.f;
     if (wanted)
     {
