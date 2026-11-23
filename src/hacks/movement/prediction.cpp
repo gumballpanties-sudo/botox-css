@@ -22,6 +22,7 @@ RestoreFrame_t g_fnRestoreFrame = nullptr;
 
 bool g_predDirty     = true;   // the entity no longer holds the restore frame
 bool g_predWalkSims  = false;  // sim as MOVETYPE_WALK (see prediction.h)
+bool g_predInSim     = false;  // inside Pred_Simulate's ProcessMovement (see prediction.h)
 int  g_simsThisCmd   = 0;
 int  g_simReserve    = 0;
 
@@ -319,7 +320,9 @@ void Pred_Simulate(void* pLocal, UserCmd_t* pCmd)
     // ponytail: snapshot START still re-categorizes; track the loaded origin if a pinned snapshot ever matters
     if (bFrameStart) s_moveData.m_bGameCodeMovedPlayer = false;
     void** gmVt = *(void***)g_gameMovement;
+    g_predInSim = true;   // client ProcessMovement hook (airstuck.inl) tells our sims from engine runs
     ((ProcessMove_t)gmVt[kGM_ProcessMovement])(g_gameMovement, pLocal, &s_moveData);
+    g_predInSim = false;
     ((FinishMove_t)predVt[kPred_FinishMove])(g_prediction, pLocal, pCmd, &s_moveData);
 
     ((SetHost_t)mhVt[kMH_SetHost])(g_moveHelper, nullptr);

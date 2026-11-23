@@ -180,6 +180,8 @@ inline bool  EntAlive(void* e) { return g_offLifeState > 0 && EntB(e, g_offLifeS
 // it. Only a sim, a fresh cmd, or a hand-written state can dirty the frame, and that is the
 // whole proof. Every restore in the TB family targets the same frame, so one flag covers all.
 extern bool g_predDirty;
+// true only while Pred_Simulate's own ProcessMovement runs: h_ProcessMovementCl (airstuck.inl) skips our sims
+extern bool g_predInSim;
 
 // both dirty the predicted frame the same way a sim does (PixelFinder places the hull by hand),
 // so the restore-skip can never hand a written-over state back as "already restored"

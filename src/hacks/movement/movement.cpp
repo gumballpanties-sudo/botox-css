@@ -1729,6 +1729,7 @@ static float s_wcPreTbFwd = 0.f, s_wcPreTbSide = 0.f;   // the keys TB was hande
 static int   s_wcPreTbButtons = 0;
 static bool s_tbSyncWant = false;      // tb key held: botox texturebug.cpp:387 sync_arm( k_sync_tb ) -- START must be the server END
 static bool s_phSyncWant = false;      // ph key held: a pin landing is exact-float, START must be the server END too
+static bool s_predSyncArmed = false;   // AS_SyncArm state: a pin feature armed. client ProcessMovement hook reads it (airstuck.inl)
 static bool s_airStuckHit = false;
 static bool s_airStuckReal = false;     // actually stuck (detections), set in AirStuckTick
 // ---- edge surf state (edgesurf.inl owns it; up here because edgebug / auto align / tb / as read it first) ----
@@ -2802,6 +2803,7 @@ static void Movement_RunImpl(UserCmd_t* pCmd)
         s_psShouldSurf = s_psShouldUnduck = false;
         s_ab.ownsCmd = false;   // botox movement.cpp:1260: stale true on a skipped tick
         ESurf_Idle();   // edge surf did not run: no sync arm, no latch carried
+        s_predSyncArmed = false;   // AS_Sync did not run: no sims, engine's run stays vanilla
         // PixelFinder is the only owner of its key edge, and it did not run this cmd. Left alone,
         // s_psFinderHeld stays stuck true for good: needPred never drops, and the NEXT real press
         // reads as "already held" so no column is ever anchored again

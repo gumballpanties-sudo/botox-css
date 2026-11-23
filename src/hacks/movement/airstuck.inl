@@ -92,10 +92,35 @@ static void AsSetVelocity(void* pLocal, const Vec3& v)
 /* online the engine keeps its own START while the server's END differs < 0.0625u / 0.5u/s ( cl_pred_optimize 2, c_baseentity.cpp:656/681,
    prediction.cpp:1681 ); pins are exact floats, so armed = full re-predict off the server snapshot every packet ( offline already is ).
    log: server END of the acked cmd vs the START we built on */
+// client IGameMovement::ProcessMovement (slot 1, the one Pred_Simulate calls). botox-tf2 fakemove.inl h_ProcessMovementCl 11-23.
+// SERVER PARITY, engine's own run (first predict + every re-predict), pin feature armed. Same rule as Pred_Simulate.
+// SetupMove sets m_bGameCodeMovedPlayer when m_vecPreviouslyPredictedOrigin != origin (prediction.cpp:617). Wrong 2 ways:
+//   1. our sims' FinishMove left that field on a sim END (not in datamap, no restore) -> first predict of the new cmd
+//   2. vanilla: first cmd of a re-predict (field = newest END, origin = server's older one)
+// Flag -> CategorizePosition at START -> pin START friction 0.25 -> 1.0 -> air accel 4x server's -> a ride press falls
+// in client pred, pins on server. Next START wrong 1 tick -> edge surf hands off -> raw keys break the server pin.
+// tf2 debug.log 11-23 badwater: 10 press ticks, 10 lost; listen 8, 0.
+// ponytail: teleport while armed = no START categorize for 1 cmd (ground + water are networked, friction stale 1 tick)
+using ProcessMovementCl_t = void(__fastcall*)(void* thisptr, void* player, CMoveData* mv);
+static ProcessMovementCl_t o_ProcessMovementCl = nullptr;
+static void __fastcall h_ProcessMovementCl(void* thisptr, void* player, CMoveData* mv)
+{
+    if (mv && !g_predInSim && s_predSyncArmed) mv->m_bGameCodeMovedPlayer = false;
+    o_ProcessMovementCl(thisptr, player, mv);
+}
+
 static void AS_SyncArm(const bool on)
 {
     static int saved = -1;
     static bool armed = false;
+    s_predSyncArmed = on;   // engine's own run drops the moved flag too (h_ProcessMovementCl)
+    // lazy, game thread inside CreateMove: ProcessMovement is never mid-call here
+    static bool s_hooked = false;
+    if (!s_hooked && g_gameMovement) {
+        s_hooked = true;
+        InstallVTableHook(g_gameMovement, kGM_ProcessMovement, "pred: client ProcessMovement", (void*)h_ProcessMovementCl,
+                          (void**)&o_ProcessMovementCl);
+    }
     if (!g_cvar) return;
     ConVar* cv = g_cvar->FindVar("cl_pred_optimize");
     if (!cv) return;

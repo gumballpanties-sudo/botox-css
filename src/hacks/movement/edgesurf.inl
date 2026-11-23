@@ -386,6 +386,11 @@ static bool ESurf_Online(void* pLocal, UserCmd_t* cmd, bool& pinned, bool& held)
         s_mem.own       = false;
         return false;
     };
+    /* check line: last cmd sent a proven pin, this START is no pin = engine's run of that cmd left the sim. want 0 online */
+    if (armed && g_debugLogEnable && s_esurfPinPrev &&
+        ((s_prePredFlags & FL_ONGROUND) || fabsf(s_prePredVel.z - TargetPredictZVel()) >= k_pinTol))
+        DebugLog("ESURF: pred miss cmd=%d vz=%.2f z=%.3f ground=%d", cmd->command_number, s_prePredVel.z, s_prePredOrigin.z,
+                 (s_prePredFlags & FL_ONGROUND) ? 1 : 0);
     if (!armed || (s_prePredFlags & FL_ONGROUND)) {
         n_es::new_fall(s_mem);
         return off(!armed ? "key" : "ground");
