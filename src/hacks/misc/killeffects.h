@@ -15,7 +15,7 @@
 //   3 smoke      -> own billboard puffs (no hitbox resolver here -> origin + stacked offsets,
 //                   botox's OWN no-bones fallback path, same as its code when bones are missing)
 //   4 explosion  -> engine particle "ExplosionCore_Wall"
-//   5 soul       -> own billboard particles, 4 sub-styles (fountain/rise/burst/converge)
+//   5 soul       -> own billboard particles, 5 sub-styles (fountain/rise/burst/converge/explode)
 //   6 balls      -> own billboard bouncy balls, attacker==local only (botox's own gate).
 //                   No hull trace here: floor-clamped at spawn Z (ponytail: real IEngineTrace
 //                   bounce needs a thread-safety read this pass chose not to risk; upgrade path
@@ -35,6 +35,14 @@
 void KillEffects_OnDeath(int victimIdx, int attackerIdx, bool localDied);
 void RenderKillEffects();   // ticks + draws the custom (non-engine) particle styles
 void KillEffects_FrameStart();   // FSN FRAME_RENDER_START: hl2 dissolve on ragdolls
+
+// botox precip_clipart.cpp ( precipitation type clipart, soul shapes snowing ). Same split as the
+// particles above: traces on the main thread, step + imgui draw on the render thread. No z buffer
+// here, so a round-robin eye trace per flake hides the ones behind walls.
+// main thread, main view setup (the post slot): spawn, cull, visibility traces, then queues this frame's draw at
+// that point of the frame -- before DrawViewModels, so the gun and hud cover the flakes
+void PrecipClipart_ViewTick(const float origin[3], const float angles[3]);
+void PrecipClipart_Reset();                            // main thread, out of game (Rain_Tick): the tick only runs while a world draws
 
 // Round 2 lua port (fx.particle/fx.sparks): exported wrappers around the same
 // DispatchEngineParticle/FxSparks this file already calls for the "blood"/"sparks" death

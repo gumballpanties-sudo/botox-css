@@ -44,6 +44,7 @@ inline bool g_perfNoFocusSleep  = true;
 inline bool  g_menuBlur       = false;
 inline float g_menuBlurAmount = 100.f;
 inline float g_menuBlurDarken = 18.f;
+inline int   g_menuOpacity    = 100;   // botox m_menu_opacity, percent 50..100 step 5
 
 // botox m_cvar_list (misc > cvars): one command per row, run top to bottom on map load /
 // server join. Slots, not botox's one '\n' string: config.cpp is one key=value per line.

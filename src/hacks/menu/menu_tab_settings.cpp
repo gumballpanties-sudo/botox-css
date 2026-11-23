@@ -156,6 +156,7 @@ struct MenuStyleRow
     ImFont* (*boldFont)();
     bool gamesense = false;  // skeet frame + gradient bar over the window (menu.cpp GamesenseFrame), layout untouched
     bool primordial = false; // black 180 outer line + solid accent line (menu.cpp PrimordialFrame), scrollbar colours
+    bool clarity = false;    // scrollbar grab 31, no track
 };
 
 static const MenuStyleRow k_menuStyles[] = {
@@ -165,9 +166,12 @@ static const MenuStyleRow k_menuStyles[] = {
     { "kamibebra", IM_COL32(13, 13, 13, 255), IM_COL32(16, 16, 16, 255), IM_COL32(13, 13, 13, 255), IM_COL32(16, 16, 16, 255),
       IM_COL32(33, 33, 33, 255), IM_COL32(11, 11, 11, 255), IM_COL32(13, 13, 13, 255), IM_COL32(200, 200, 200, 255),
       IM_COL32(150, 150, 150, 255), 6.f, 4.f, 6.f, []() -> ImFont* { return g_fontKamibebra13; }, []() -> ImFont* { return g_fontKamibebraBold13; } },
-    { "clarity v2", IM_COL32(23, 23, 23, 255), IM_COL32(28, 28, 28, 255), IM_COL32(23, 23, 23, 255), IM_COL32(28, 28, 28, 255),
-      IM_COL32(55, 55, 55, 255), IM_COL32(7, 7, 7, 255), IM_COL32(23, 23, 23, 255), IM_COL32(255, 255, 255, 255),
-      IM_COL32(100, 100, 100, 255), 5.f, 5.f, 5.f, []() -> ImFont* { return g_fontClarityInter; }, []() -> ImFont* { return g_fontInterBold15; } },
+    // csgo menu.cpp "clarity v2" row: screenshot px window 9 r5, group 13 + 31 line r3 (band = child), checkbox 23 + 31 r2,
+    // text 221 (unchecked label 221 @ .5 on 13 = 117)
+    { "clarity v2", IM_COL32(9, 9, 9, 255), IM_COL32(13, 13, 13, 255), IM_COL32(13, 13, 13, 255), IM_COL32(23, 23, 23, 255),
+      IM_COL32(31, 31, 31, 255), IM_COL32(31, 31, 31, 255), IM_COL32(13, 13, 13, 255), IM_COL32(221, 221, 221, 255),
+      IM_COL32(117, 117, 117, 255), 5.f, 2.f, 3.f, []() -> ImFont* { return g_fontClarityInter; }, []() -> ImFont* { return g_fontInterBold15; },
+      false, false, true },
     { "lobotomy v1", IM_COL32(15, 15, 15, 255), IM_COL32(13, 13, 13, 255), IM_COL32(15, 15, 15, 255), IM_COL32(13, 13, 13, 255),
       IM_COL32(30, 30, 30, 255), IM_COL32(30, 30, 30, 255), IM_COL32(15, 15, 15, 255), IM_COL32(255, 255, 255, 255),
       IM_COL32(200, 200, 200, 255), 0.f, 0.f, 0.f, []() -> ImFont* { return g_fontMenuTahoma9; }, []() -> ImFont* { return g_fontMenuTahomaBd9; } },
@@ -216,6 +220,14 @@ static void MenuStyleApply(const MenuStyleRow& s)
         style.Colors[ImGuiCol_ScrollbarGrabHovered] = ImGui::ColorConvertU32ToFloat4(IM_COL32(61, 61, 61, 255));
         style.Colors[ImGuiCol_ScrollbarGrabActive]  = style.Colors[ImGuiCol_Accent];
         style.ScrollbarRounding = 9.f;
+    }
+    // clarity scrollbar: grab 31 idle + hover, held accent, track alpha 1 = themed path on, nothing visible
+    if (s.clarity)
+    {
+        style.Colors[ImGuiCol_ScrollbarBg]          = ImGui::ColorConvertU32ToFloat4(IM_COL32(0, 0, 0, 1));
+        style.Colors[ImGuiCol_ScrollbarGrab]        = ImGui::ColorConvertU32ToFloat4(IM_COL32(31, 31, 31, 255));
+        style.Colors[ImGuiCol_ScrollbarGrabHovered] = style.Colors[ImGuiCol_ScrollbarGrab];
+        style.Colors[ImGuiCol_ScrollbarGrabActive]  = style.Colors[ImGuiCol_Accent];
     }
 }
 
@@ -282,6 +294,9 @@ void Tab_Settings()
         ImGui::Combo("theme", &g_menuStyle, styleName, nullptr, k_menuStyleCount);
 
         ImGui::ColorRow("accent color##accent color", g_accentColor, kPickerNoAlpha);
+
+        ImGui::SliderInt("menu opacity", &g_menuOpacity, 50, 100, "%d%%", ImGuiSliderFlags_AlwaysClamp);
+        g_menuOpacity = ImClamp((g_menuOpacity + 2) / 5 * 5, 50, 100);
 
         // botox menu_tab_settings: edits a copy, commits while not held -- the whole menu
         // rescales under the cursor otherwise (render/dpi.cpp)

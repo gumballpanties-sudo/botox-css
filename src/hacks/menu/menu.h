@@ -2,8 +2,10 @@
 #include "../../globals/globals.h"
 
 void RenderMenu();
+const char* BuildDateText();   // "<d> <mon> <yyyy>" off the PE timestamp: menu title + boot screen card
 bool RenderMenuBlur();    // background blur: call after the layers it should blur (esp, world fx), before HUD panels. true = drew
 float Menu_FadeAlpha();   // botox m_anim_progress, render.cpp fades the menu layer by it
+float Menu_LayerAlpha();  // Menu_FadeAlpha * menu opacity slider: the menu + popup layer alpha
 
 // botox fade_draw_lists popup half: confirm popups (SavePopup) fade on their own, 2x menu speed.
 // Once per built frame: moves lists owned by a fading popup out of `lists` into `out`, plus

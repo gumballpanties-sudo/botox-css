@@ -2552,6 +2552,78 @@ static void DrawGrimoire(ImDrawList* dl)
     }
 }
 
+// style 35: datashell -- Datashell-main visuals.cpp spec_list (botox draw_spectator_list_datashell): header box h 15
+// (last fill 1 px bigger), "spectators" accent 46.5 in, line peaks 1 / .4 / .3. rows box gap (spec_seperator 5..25)
+// under it, .5 px wider each side, h 15 + rows * 10, row n at top + n * 10, 9.5 in from the header.
+// width = "spectators" + 84, never grows (donor). watcher of us = spectating local colour, rest white, SourceTV dropped
+static ImU32 DatashellAccent(float a = 1.f)
+{
+    const ImVec4 acc = ImGui::GetStyleColorVec4(ImGuiCol_Accent);
+    return ImGui::ColorConvertFloat4ToU32(ImVec4(acc.x, acc.y, acc.z, a));
+}
+static void DatashellLine(ImDrawList* dl, float x0, float x1, float y, float h, float peak2, float peak3)
+{
+    const float mid = x0 + (x1 - x0) * 0.5f;
+    const ImU32 none = DatashellAccent(0.f);
+    const float peaks[3] = { 1.f, peak2, peak3 };
+    for (int i = 0; i < 3; i++) {
+        const ImU32 peak = DatashellAccent(peaks[i]);
+        const float bottom = y + h + (i == 2 ? 1.f : 0.f);
+        dl->AddRectFilledMultiColor(ImVec2(x0, y), ImVec2(mid, bottom), none, peak, peak, none);
+        dl->AddRectFilledMultiColor(ImVec2(mid, y), ImVec2(x1, bottom), peak, none, none, peak);
+    }
+}
+static void DatashellFill(ImDrawList* dl, ImVec2 min, ImVec2 max, float grow = 0.f)
+{
+    dl->AddRectFilled(min, max, IM_COL32(0, 0, 0, 255));
+    dl->AddRect(min, max, IM_COL32(9, 9, 9, 205));
+    dl->AddRectFilled(min, ImVec2(max.x + grow, max.y + grow), IM_COL32(9, 9, 9, 205));
+}
+static void DrawDatashell(ImDrawList* dl)
+{
+    ImFont* font = Font(g_fontDatashellBold12);
+    const bool showTarget = g_specShowTarget;
+
+    std::vector<SpecEntry> entries;
+    Collect(entries, true);
+    entries.erase(std::remove_if(entries.begin(), entries.end(), [&](const SpecEntry& e) { return !showTarget && !e.watchingLocal; }), entries.end());
+    SortByIndex(entries);
+
+    // donor always draws the header; empty = header only
+    if (entries.empty() && !g_specAlwaysShow) return;
+
+    constexpr const char* header = "spectators";
+    constexpr float boxH = 15.f;
+
+    const float size = font->FontSize;
+    const float headerW = TextWs(font, size, header);
+    const float boxW = headerW + 84.f;
+    const float gap = std::clamp(g_specDatashellGap, 5.f, 25.f);
+    const float rowsH = boxH + (float)entries.size() * 10.f;
+    const float totalH = entries.empty() ? boxH + 1.f : boxH + gap + rowsH;
+    float x, y; Place(boxW + 1.f, totalH, x, y);
+
+    const ImU32 accent = DatashellAccent();
+    const float headX = x + 0.5f;
+
+    // donor order: header bg, header text, header line (over the text top), rows bg, rows line, rows
+    DatashellFill(dl, ImVec2(headX, y), ImVec2(headX + boxW, y + boxH), 1.f);
+    dl->AddText(font, size, ImVec2(headX + 46.5f, y + 2.f), accent, header);
+    DatashellLine(dl, headX + 3.5f, headX + boxW - 5.5f, y, 4.f, 0.4f, 0.3f);
+    if (entries.empty()) return;
+
+    const float rowsY = y + boxH + gap;
+    DatashellFill(dl, ImVec2(x, rowsY), ImVec2(x + boxW + 1.f, rowsY + rowsH));
+    DatashellLine(dl, x + 4.f, x + boxW - 5.f, rowsY, 4.f, 0.4f, 0.3f);
+
+    const ImU32 local = U32(g_specColorOne);
+    float rowY = rowsY;
+    for (const SpecEntry& e : entries) {
+        rowY += 10.f;
+        dl->AddText(font, size, ImVec2(headX + 9.5f, rowY), e.watchingLocal ? local : IM_COL32(255, 255, 255, 255), RowText(e).c_str());
+    }
+}
+
 // ==== drag + dispatch ==========================================================================
 // Styles that hardcode their x/y instead of calling Place(); SpecDrag shifts the vertices they added
 // (none of them push a clip rect or a BlurRect).
@@ -2660,6 +2732,7 @@ static void DrawStyle(ImDrawList* dl, ImGuiIO& io)
     case 32: DrawKamidere(dl, io);      break;
     case 33: DrawHotwheelsV1(dl);       break;
     case 34: DrawGrimoire(dl);          break;
+    case 35: DrawDatashell(dl);         break;
     default: break;
     }
 }

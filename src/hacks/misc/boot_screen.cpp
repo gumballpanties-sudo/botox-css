@@ -1,5 +1,8 @@
 #include "boot_screen.h"
 #include "../screen/blur_rect.h"
+#include "../menu/menu.h"        // BuildDateText
+#include "../menu/menu_flow.h"   // mf::kHeaderH
+#include "../../render/dpi.h"
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -10,8 +13,9 @@
 #include <atomic>
 
 // botox csgo-sdk hacks/misc/boot_screen.cpp at e14be34 (dna particles flying out of the
-// centre, "injecting <step>" + 3 pulsing dots, bar + label centred as one block, step times
-// remembered in boot_times.txt, the rest of the overlay fading in after it).
+// centre, step times remembered in boot_times.txt, the rest of the overlay fading in after it).
+// 11-22 card (csgo-sdk boot_screen.cpp, same day): bar + label = small default menu window
+// ("botox | date" band, "injecting <step>" + 3 pulsing dots, dim %, slider look bar). Never themed.
 // TF2 differences:
 //   - the splash can only start on the first hooked Present, by which point modules ..
 //     config are already done (MainThread), so those stamp at once; "hooks" waits for
@@ -122,6 +126,16 @@ void Spawn(Particle& p, float dist)
     p.rate  = 0.6f + (float)(rand() % 40) / 100.f;
 }
 
+// scale = alpha x 256
+void ScaleAlpha(ImDrawList* list, int begin, int end, ImU32 scale)
+{
+    for (int v = begin; v < end; ++v)
+    {
+        ImU32& col = list->VtxBuffer.Data[v].col;
+        col = (col & ~IM_COL32_A_MASK) | (((((col >> IM_COL32_A_SHIFT) & 0xFF) * scale) >> 8) << IM_COL32_A_SHIFT);
+    }
+}
+
 // MainThread: returns at flag, or at once when no frames come (minimised), 1.5s cap
 void WaitFor(const std::atomic<bool>& flag)
 {
@@ -229,14 +243,11 @@ void RenderBootScreen()
 
     ImDrawList* dl = ImGui::GetForegroundDrawList();
     g_splashVtx = dl->VtxBuffer.Size;
-    const auto color = [fade](float a) { return IM_COL32(255, 255, 255, (int)(a * fade * 255.f + 0.5f)); };
 
     BlurRectFade(dl, ImVec2(0.f, 0.f), ImVec2(w, h), 1.f, fade);   // botox screen_blur_fullscreen(.., 5 passes)
     dl->AddRectFilled(ImVec2(0.f, 0.f), ImVec2(w, h), IM_COL32(0, 0, 0, (int)(0.18f * fade * 255.f)));
 
-    // content grows 94 -> 100% and rises 10 px with the fade
-    const float grow = 0.94f + 0.06f * fade;
-    const ImVec2 center(w * 0.5f, h * 0.5f + 10.f * u * (1.f - fade));
+    const ImVec2 center(w * 0.5f, h * 0.5f);
 
     // first frame spreads them along their rays so the stream is already full; off screen = back to the center
     const float reach = std::hypot(w, h) * 0.5f + 4.f * u;
@@ -258,38 +269,68 @@ void RenderBootScreen()
                             ImGui::GetColorU32(ImVec4(accent.x, accent.y, accent.z, a)));
     }
 
-    char text[96];
-    if (ejecting)
-    {
-        if (done) snprintf(text, sizeof(text), "ejected");
-        else      snprintf(text, sizeof(text), "ejecting   %d%%", (int)(shown * 100.f));
-    }
-    else if (done) snprintf(text, sizeof(text), "injected");
-    else      snprintf(text, sizeof(text), "injecting %s   %d%%", k_steps[(std::min)(g_done, k_count - 1)], (int)(shown * 100.f));
+    char label[64], percent[8], date[48];
+    if (done)          snprintf(label, sizeof(label), "%s", ejecting ? "ejected" : "injected");
+    else if (ejecting) snprintf(label, sizeof(label), "ejecting");
+    else               snprintf(label, sizeof(label), "injecting %s", k_steps[(std::min)(g_done, k_count - 1)]);
+    snprintf(percent, sizeof(percent), "%d%%", done ? 100 : (int)(std::clamp(shown, 0.f, 1.f) * 100.f));
+    snprintf(date, sizeof(date), " | %s", BuildDateText());
 
-    // menu "botox" label font, native size: monochrome verdana goes soft when scaled
-    ImFont* font = g_menuBold ? g_menuBold : ImGui::GetFont();
-    const ImVec2 extent = font->CalcTextSizeA(font->FontSize, FLT_MAX, 0.f, text);
-    const float dotW = done ? 0.f : font->CalcTextSizeA(font->FontSize, FLT_MAX, 0.f, ".").x;
+    // the default menu window in small, never the picked theme: band with its title, accent lines,
+    // slider look bar. drawn opaque, alpha scaled after; one panel block = "dpi scale panels"
+    DpiPanel panel = Dpi_PanelBegin(dl);
+    const int cardBegin = dl->VtxBuffer.Size;
 
-    // bar + gap + label centered as one block
-    const float barW = 260.f * u * grow, barH = (std::max)(std::round(4.f * u), 2.f), gap = std::round(12.f * u);
-    const ImVec2 barMin(std::floor(center.x - barW * 0.5f), std::floor(center.y - (barH + gap + extent.y) * 0.5f));
-    const ImVec2 barMax(barMin.x + barW, barMin.y + barH);
-    dl->AddRectFilled(barMin, barMax, color(0.15f), barH * 0.5f);
-    if (shown > 0.001f)
-        dl->AddRectFilled(barMin, ImVec2(barMin.x + barW * (std::min)(shown, 1.f), barMax.y), color(0.95f), barH * 0.5f);
+    ImFont* const bold    = g_menuBold ? g_menuBold : ImGui::GetFont();
+    ImFont* const regular = g_menuReg ? g_menuReg : ImGui::GetFont();
+    const auto width = [](ImFont* f, const char* s) { return f->CalcTextSizeA(f->FontSize, FLT_MAX, 0.f, s).x; };
 
-    // dots counted in the width so the label never shifts
-    const ImVec2 textPos(std::floor(center.x - (extent.x + 3.f * dotW) * 0.5f), barMax.y + gap);
-    dl->AddText(font, font->FontSize, textPos, color(1.f), text);
+    constexpr float kWidth = 280.f, kPad = 12.f, kGap = 7.f, kBar = 8.f, kBand = mf::kHeaderH, kBottom = 12.f;   // menu_bottom_band_height
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const ImU32 accentCol = ImGui::GetColorU32(accent), bandCol = ImGui::GetColorU32(ImGuiCol_MenuBand);
+    const ImU32 textCol   = ImGui::GetColorU32(ImGuiCol_Text);
+
+    // slides up 10 px with the fade, whole px: text stays sharp
+    const ImVec2 size(kWidth, kBand + kPad + regular->FontSize + kGap + kBar + kPad + kBottom);
+    const ImVec2 pos(std::floor(center.x - size.x * 0.5f), std::floor(center.y - size.y * 0.5f + 10.f * (1.f - fade)));
+    const ImVec2 cardMax(pos.x + size.x, pos.y + size.y);
+
+    dl->AddRectFilled(pos, cardMax, ImGui::GetColorU32(ImGuiCol_WindowBg), style.WindowRounding);
+    dl->AddRectFilled(pos, ImVec2(cardMax.x, pos.y + kBand), bandCol, style.WindowRounding, ImDrawFlags_RoundCornersTop);
+    dl->AddRectFilled(ImVec2(pos.x, cardMax.y - kBottom), cardMax, bandCol, style.WindowRounding, ImDrawFlags_RoundCornersBottom);
+    dl->AddRect(pos, cardMax, ImGui::GetColorU32(ImGuiCol_MenuWindowOutline), style.WindowRounding);
+    RenderFadedGradientLine(dl, ImVec2(pos.x, pos.y + kBand - 1.f), ImVec2(size.x, 1.f), ImColor(accentCol));
+    RenderFadedGradientLine(dl, ImVec2(pos.x, cardMax.y - kBottom), ImVec2(size.x, 1.f), ImColor(accentCol));
+
+    // menu title: bold name, accent build date
+    const ImVec2 titleSize = bold->CalcTextSizeA(bold->FontSize, FLT_MAX, 0.f, "botox");
+    const ImVec2 titlePos(pos.x + (size.x - titleSize.x - width(regular, date)) / 2.f, pos.y + (kBand - titleSize.y) / 2.f);
+    dl->AddText(bold, bold->FontSize, titlePos, textCol, "botox");
+    dl->AddText(regular, regular->FontSize, ImVec2(titlePos.x + titleSize.x, titlePos.y), accentCol, date);
+
+    const float left = pos.x + kPad, right = cardMax.x - kPad, rowY = pos.y + kBand + kPad;
+    dl->AddText(regular, regular->FontSize, ImVec2(left, rowY), textCol, label);
+    dl->AddText(regular, regular->FontSize, ImVec2(right - width(regular, percent), rowY), ImGui::GetColorU32(ImGuiCol_TextDisabled), percent);
 
     // working: 3 dots pulse left to right, 1.2s loop
+    const float labelW = width(regular, label), dotW = width(regular, ".");
     for (int i = 0; i < 3 && !done; ++i)
     {
         const float wave = 0.5f + 0.5f * std::cos((clock_ - (float)i * 0.2f) * (2.f * kPi / 1.2f));
-        dl->AddText(font, font->FontSize, ImVec2(textPos.x + extent.x + (float)i * dotW, textPos.y), color(0.2f + 0.8f * wave), ".");
+        dl->AddText(regular, regular->FontSize, ImVec2(left + labelW + (float)i * dotW, rowY),
+                    ImGui::GetColorU32(ImGuiCol_Text, 0.2f + 0.8f * wave), ".");
     }
+
+    // menu slider: frame, outline, solid accent fill over both
+    const ImVec2 barMin(left, rowY + regular->FontSize + kGap), barMax(right, barMin.y + kBar);
+    const float fill = std::floor((barMax.x - barMin.x) * std::clamp(shown, 0.f, 1.f));
+    dl->AddRectFilled(barMin, barMax, ImGui::GetColorU32(ImGuiCol_MenuFrame), style.FrameRounding);
+    dl->AddRect(barMin, barMax, ImGui::GetColorU32(ImGuiCol_MenuOutline), style.FrameRounding);
+    if (fill >= 1.f)
+        dl->AddRectFilled(barMin, ImVec2(barMin.x + fill, barMax.y), accentCol | IM_COL32_A_MASK, fill > 1.f ? style.FrameRounding : 0.f);
+
+    ScaleAlpha(dl, cardBegin, dl->VtxBuffer.Size, (ImU32)(fade * 256.f));
+    Dpi_PanelEnd(panel);
 }
 
 void BootScreen_FadeOthers(ImDrawData* dd)
@@ -301,11 +342,6 @@ void BootScreen_FadeOthers(ImDrawData* dd)
     for (int i = 0; i < dd->CmdListsCount; ++i)
     {
         ImDrawList* const list = dd->CmdLists[i];
-        const int end = list == splash && g_splashVtx >= 0 ? (std::min)(g_splashVtx, list->VtxBuffer.Size) : list->VtxBuffer.Size;
-        for (int v = 0; v < end; ++v)
-        {
-            ImU32& col = list->VtxBuffer.Data[v].col;
-            col = (col & ~IM_COL32_A_MASK) | (((((col >> IM_COL32_A_SHIFT) & 0xFF) * scale) >> 8) << IM_COL32_A_SHIFT);
-        }
+        ScaleAlpha(list, 0, list == splash && g_splashVtx >= 0 ? (std::min)(g_splashVtx, list->VtxBuffer.Size) : list->VtxBuffer.Size, scale);
     }
 }

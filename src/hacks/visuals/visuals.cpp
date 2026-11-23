@@ -9,6 +9,7 @@
 #include "chams_api.h"    // 10-31: chams + glow passes (aim/chams.cpp)
 #include "lsd_chams.h"    // WeaponSheen_Begin/End -- botox weapon_sheen.cpp layer
 #include "world_fx.h"     // WorldFx_Tick -- unit D: fullbright + disable interp pokes
+#include "../misc/killeffects.h"   // PrecipClipart_Reset -- out of game, from Rain_Tick
 #include "world_fx2.h"    // WorldFx2_Tick/_OnFindMaterial -- unit D2: dlight, sun angle, tints
 #include "mc_world.h"     // MCWorld_OnSkyBoxDrawn -- minecraft sky behind the 2D sky draw
 #include "rear_mirror.h"  // RearMirror_Drawing -- the back view draws plain models, no mc sky
@@ -1341,13 +1342,18 @@ void Rain_Tick()
     if (g_eject) { if (Precip_IsLive()) Precip_TearDown(kSlot); return; }
     // Out of game the engine owns the teardown (level change / disconnect deletes every client
     // entity, ours too). Forget it, never Release it -- and never CreateFn in the main menu.
-    if (!IsInGame()) { if (Precip_IsLive() || s_lastAppliedMode != -99) Precip_OnLevelChange(); return; }
+    if (!IsInGame()) {
+        PrecipClipart_Reset();   // its own tick needs a world view, so map change / disconnect is cleared here
+        if (Precip_IsLive() || s_lastAppliedMode != -99) Precip_OnLevelChange();
+        return;
+    }
 
     // The checkbox is the on/off; the combo shows "rain" for anything that is not snow. A fresh
     // config (mode 0) or one saved by the old combo binding (0 = "rain" picked) means rain.
-    if (g_weatherEnable && g_weatherMode != 1 && g_weatherMode != 2) g_weatherMode = 1;
+    if (g_weatherEnable && g_weatherMode != 1 && g_weatherMode != 2 && g_weatherMode != k_weatherClipart) g_weatherMode = 1;
 
-    if (!g_weatherEnable || g_weatherMode == 0) {
+    // clipart = own glyphs (killeffects_world.cpp PrecipClipart_*), the engine entity parks like off
+    if (!g_weatherEnable || g_weatherMode == 0 || g_weatherMode == k_weatherClipart) {
         if (s_lastAppliedMode == 0) return;
         // -99 (just spawned, never applied) used to fall through BOTH arms here: no teardown, and
         // s_lastAppliedMode went to 0, so the entity was orphaned live at the slot. Park covers it.

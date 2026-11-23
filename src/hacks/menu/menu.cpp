@@ -481,7 +481,7 @@ static const SidebarTab kSidebar[TAB_COUNT] = {
 // PE timestamp of this module, via localtime_s, falling back to __DATE__ if that read
 // fails. Format "<d> <mon> <yyyy>", lowercase 3-letter month -- NOT the day name (botox
 // has no weekday in the title, that was this fork's own embellishment).
-static const char* BuildDateText()
+const char* BuildDateText()
 {
     static char s_text[20] = { 0 };
     if (s_text[0]) return s_text;
@@ -742,6 +742,7 @@ static void EjectPopup()
 // band, title, tab and border, so the chrome popped while the widgets faded.
 static float s_animProgress = 0.f;
 float Menu_FadeAlpha() { return ImSaturate(s_animProgress); }
+float Menu_LayerAlpha() { return Menu_FadeAlpha() * (ImClamp(g_menuOpacity, 50, 100) / 100.f); }
 
 static bool OwnsWindow(ImGuiWindow* w, ImGuiWindow* root)
 {
@@ -788,7 +789,7 @@ int Menu_SplitPopups(ImDrawList** lists, int& count, MenuFadedList* out, int max
 
     int n = 0;
     if (!shown) return 0;   // !shown emptied s_popups above
-    const float menu_fade = ImSaturate(s_animProgress);
+    const float menu_fade = Menu_LayerAlpha();
 
     ImGuiContext& g = *GImGui;
     int keep = 0;

@@ -185,7 +185,6 @@ static const float(*PsW2SMatrix())[4]
 {
     return s_rtMatrixOk ? s_rtMatrix : PsEngineW2S();
 }
-
 // render.h: same matrix the overlay build projects with (web quads, raw d3d inside the build)
 const float(*Render_W2SMatrix())[4] { return PsW2SMatrix(); }
 
@@ -1701,6 +1700,8 @@ static void BuildFontAtlas()
     orElse(g_fontLobotomy13, g_fontBold); orElse(g_fontLobotomyBold13, g_fontLobotomy13);
     // grimoire menu_font_bold: tahomabd 11, mono hinting (its Bitmap flag is a no-op, tahomabd has no EBDT)
     g_fontGrimoireBold11 = sys("tahomabd.ttf", 11.f, mono);               orElse(g_fontGrimoireBold11, g_fontBold);
+    // datashell watermark_font: verdanab 12, flags mono hinting + no antialiasing
+    g_fontDatashellBold12 = sys("verdanab.ttf", 12.f, mono);              orElse(g_fontDatashellBold12, g_fontBold);
     orElse(g_fontKamibebra13, g_fontBold); orElse(g_fontKamibebraBold13, g_fontKamibebra13);
     // botox font_name_primordial_roboto_13 pair: primordial.bin's own roboto, antialiased, px = guess
     g_fontPrimordialRoboto13       = donor(primordial_roboto_regular, sizeof(primordial_roboto_regular), 13.f, 0);
@@ -2564,7 +2565,7 @@ chain:
             const float rest  = 1.f - Menu_FadeAlpha();
             const float slide = ImFloor(12.f * Dpi_Scale() * rest * rest * rest + 0.5f);
             RenderSubset(s_ovLists, s_ovCount);
-            RenderSubset(s_fadeLists, s_fadeCount, Menu_FadeAlpha(), slide);
+            RenderSubset(s_fadeLists, s_fadeCount, Menu_LayerAlpha(), slide);
             for (int i = 0; i < s_popCount; ++i)   // botox: popups on top of the menu, each at its own alpha
                 RenderSubset(&s_popLists[i].list, 1, s_popLists[i].alpha, slide);
             RenderSubset(s_menuLists, s_menuCount);

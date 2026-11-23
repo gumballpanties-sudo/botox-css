@@ -28,6 +28,7 @@
     { "menuBlur",           CfgEntry::BOOL,  &g_menuBlur, 0 },
     { "menuBlurAmount",     CfgEntry::FLOAT, &g_menuBlurAmount, 0 },
     { "menuBlurDarken",     CfgEntry::FLOAT, &g_menuBlurDarken, 0 },
+    { "menuOpacity",        CfgEntry::INT,   &g_menuOpacity, 0 },
     { "cvarRow0",  CfgEntry::STR, g_cvarRows[0],  sizeof(g_cvarRows[0]) },
     { "cvarRow1",  CfgEntry::STR, g_cvarRows[1],  sizeof(g_cvarRows[1]) },
     { "cvarRow2",  CfgEntry::STR, g_cvarRows[2],  sizeof(g_cvarRows[2]) },

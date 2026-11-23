@@ -9,6 +9,7 @@
 #include "shaders/fx_quad_vs.h"   // k_fxQuadVsBytes   -- compiled from fx_quad_vs.hlsl by fxc
 #include "../visuals/reflections.h"  // unit D3: Reflections_Draw -- same depth source, same draw point
 #include "../visuals/mc_world.h"      // unit D3: MCWorld_UpdateView -- cloud drift off this view setup
+#include "../misc/killeffects.h"      // PrecipClipart_ViewTick -- clipart precipitation traces off this view setup
 #include "../visuals/lsd_chams.h"     // WeaponSheen_Destroy in ScreenFx_Destroy
 #include "screenfx_passes.h" // ScreenFxPasses_DepthView -- emphasize/show depth, same draw point
 #include "../web/websurface.h"  // Web_OnPostScreenSpaceEffects -- botox do_post_screen_space_effects.cpp:58
@@ -1805,6 +1806,9 @@ static void FxReadViewSetup(const void* setup)
     // unit D3: the sky/clouds pass's world-space cloud drift -- same thread, same reason
     // (g_globalVars->curtime and the player's own origin are main-thread only).
     MCWorld_UpdateView(fbOrigin);
+
+    // clipart precipitation: spawn / sky / landing / sight traces, same thread, same reason
+    PrecipClipart_ViewTick(fbOrigin, fbAngles);
 
     // unit screen: reflections' nearest env_cubemap pick + file loads (botox pick_cubemap, main thread)
     Reflections_UpdateView(fbOrigin, fbAngles);

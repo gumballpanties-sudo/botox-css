@@ -120,3 +120,23 @@ inline float g_wdVmFov = 68.f;                                     // m_viewmode
 // in h_CalcViewModelView (visuals.cpp), same spot gun-lower/landing-dip already nudge from.
 inline float g_wdVmShiftLeft  = 0.f;                               // m_viewmodel_shift_left  (0..10)
 inline float g_wdVmShiftRight = 0.f;                               // m_viewmodel_shift_right (0..10)
+
+// ---- precipitation clipart (botox variables.h m_precipitation_clipart_*, 11-22) ----
+inline constexpr int k_weatherClipart = 3;                         // g_weatherMode 3 = botox type 4 clipart, no engine entity
+inline int   g_clipShape        = 1;                               // m_precipitation_clipart_shape ( n_particle_shape combo )
+inline int   g_clipColorMode    = 0;                               // _color_mode 0 single / 1 multicolor / 2 rainbow
+inline float g_clipColor[4]     = { 1.f, 1.f, 1.f, 1.f };          // _color
+inline float g_clipSaturation   = 0.7f;                            // _saturation
+inline float g_clipRainbowSpeed = 0.2f;                            // _rainbow_speed
+inline int   g_clipGlow         = 0;                               // _glow 0 off / 1 glyph color / 2 custom
+inline float g_clipGlowColor[4] = { 1.f, 1.f, 1.f, 160.f / 255.f }; // _glow_color
+inline int   g_clipDensity      = 600;                             // _density
+inline float g_clipSpeed        = 70.f;                            // _speed
+inline float g_clipSize         = 3.f;                             // _size
+inline float g_clipSpin         = 0.25f;                           // _spin
+inline bool  g_clip3d           = false;                           // _3d ( planes tumbling in 3d, settle flat )
+inline float g_clipSway         = 8.f;                             // _sway
+inline float g_clipWind         = 0.f;                             // _wind
+inline float g_clipWindYaw      = 0.f;                             // _wind_yaw
+inline float g_clipRadius       = 900.f;                           // _radius
+inline float g_clipGroundTime   = 3.f;                             // _ground_time
