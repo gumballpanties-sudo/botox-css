@@ -25,6 +25,8 @@ namespace n_lua_api
 
 	void open( lua_State* L );
 	int traceback( lua_State* L );
+	/* render thread, every frame ( lua.cpp on_paint ): frees render.image pictures 10 s after their last draw */
+	void image_sweep( );
 	/* game console (tier0 Msg) */
 	void console_msg( const std::string& text );
 

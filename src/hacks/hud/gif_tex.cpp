@@ -304,6 +304,18 @@ void GifTex_PathInput(const char* label, const char* hint, char* buf, size_t buf
     }
 }
 
+void GifTex_Erase(const char* id)
+{
+    const auto it = id ? s_cache.find(id) : s_cache.end();
+    if (it == s_cache.end()) return;
+
+    GifTex& g = it->second;
+    if (g.texture) g.texture->Release();
+    delete g.bitmap;   // before its stream
+    if (g.stream) g.stream->Release();
+    s_cache.erase(it);
+}
+
 void GifTex_ReleaseAll()
 {
     for (auto& kv : s_cache)

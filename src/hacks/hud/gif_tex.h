@@ -21,6 +21,10 @@ ImTextureID GifTex_Frame(GifTex* gif, double timeSec);
 
 void GifTex_ReleaseAll();   // device Reset: the DEFAULT-pool frame texture is gone, GDI+ bitmap survives
 
+// RENDER THREAD: drop one entry for good (texture, bitmap, stream). Only for an id nobody else holds a GifTex* to and
+// that no draw list of this frame uses (lua render.image: "lua:path|stamp", 10 s after its last draw).
+void GifTex_Erase(const char* id);
+
 // pixel size of the decoded GIF (frame 0 = every frame). false until it decoded.
 bool GifTex_Size(GifTex* gif, float& w, float& h);
 int  GifTex_FrameCount(GifTex* gif);   // 0 until it decoded

@@ -46,8 +46,11 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <fstream>
+#include <iterator>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include "../../globals/globals.h"
 #include "../../dependencies/imgui/imgui.h"
@@ -57,8 +60,10 @@
 #include "../aim/css_bridge.h"      // CssBridge_*/Css_* -- the sanctioned non-aim CSS game API
 #include "../misc/killeffects.h"    // KillEffects_DispatchParticle/_Sparks -- fx.particle/fx.sparks
 #include "../visuals/esp_preview.h" // EspPreview::AnimRoot* -- model:animate / entity:animate roots
+#include "../hud/gif_tex.h"          // GifTex_Get / _Frame -- render.image
 
 #include "lua_api.h"
+#include "lua_image.h"
 
 void DebugLog(const char* fmt, ...);
 
@@ -73,6 +78,7 @@ namespace
 	constexpr const char* k_cmd_meta     = "botox.cmd";
 	constexpr const char* k_event_meta   = "botox.event";
 	constexpr const char* k_model_meta   = "botox.model";
+	constexpr const char* k_image_meta   = "botox.image";
 
 	struct element_ref_t { int m_index; };
 	struct entity_ref_t  { int m_index; };   // entity index, never a raw pointer (see css_bridge.h rule)
@@ -645,6 +651,93 @@ namespace
 		}
 		lua_pushnumber(L, screen.x);
 		lua_pushnumber(L, screen.y);
+		return 2;
+	}
+
+	/* ---- images: load_image reads the header only (lua_image.h), render.image decodes on the first draw (gif_tex;
+	   paint already runs on the render thread here). uservalue 1 = "path|stamp": a new stamp = the file changed ---- */
+
+	constexpr int k_image_max_side = 4096;
+
+	struct image_ref_t { int m_width; int m_height; };
+
+	// "path|stamp" -> own gif_tex entry "lua:path|stamp" (render thread). Never GifTex_Reload / GetFile: those swap the
+	// texture of an entry visuals > images may have drawn earlier this frame. A changed file = new stamp = new entry.
+	// Freed 10 s after its last draw (n_lua_api::image_sweep, every frame from on_paint).
+	struct lua_image_t { GifTex* m_gif = nullptr; unsigned long long m_used = 0; };
+	std::unordered_map< std::string, lua_image_t > s_images;
+
+	const image_ref_t* check_image(lua_State* L) { return static_cast< const image_ref_t* >(luaL_checkudata(L, 1, k_image_meta)); }
+
+	int l_render_load_image(lua_State* L)
+	{
+		const std::string name = luaL_checkstring(L, 1);
+		const bool absolute    = (name.size() > 1 && name[1] == ':') || name.starts_with("\\\\");
+		const std::string path = absolute ? name : g_lua.folder().string() + "\\images\\" + name;
+
+		int width = 0, height = 0;
+		std::uint64_t stamp = 0;
+		const char* why     = n_lua_image::probe(path.c_str(), width, height, stamp);
+		std::string error   = why ? why : "";
+		if (error.empty() && (width > k_image_max_side || height > k_image_max_side))
+			error = std::to_string(width) + "x" + std::to_string(height) + ", max " + std::to_string(k_image_max_side) + " px a side";
+
+		if (!error.empty()) {
+			lua_pushnil(L);
+			lua_pushstring(L, ("render.load_image: " + path + ": " + error).c_str());
+			return 2;
+		}
+
+		auto* image     = static_cast< image_ref_t* >(lua_newuserdatauv(L, sizeof(image_ref_t), 1));
+		image->m_width  = width;
+		image->m_height = height;
+		lua_pushstring(L, (path + "|" + std::to_string(stamp)).c_str());
+		lua_setiuservalue(L, -2, 1);
+		luaL_setmetatable(L, k_image_meta);
+		return 1;
+	}
+
+	int l_render_image(lua_State* L)
+	{
+		require_paint(L);
+
+		const image_ref_t* image = check_image(L);
+		const float x = check_float(L, 2), y = check_float(L, 3);
+		float w = opt_float(L, 4, 0.f), h = opt_float(L, 5, 0.f);
+		if (w <= 0.f && h <= 0.f) {
+			w = static_cast< float >(image->m_width);
+			h = static_cast< float >(image->m_height);
+		} else if (h <= 0.f)
+			h = w * static_cast< float >(image->m_height) / static_cast< float >(image->m_width);
+		else if (w <= 0.f)
+			w = h * static_cast< float >(image->m_width) / static_cast< float >(image->m_height);
+
+		const unsigned int color = opt_color(L, 6);
+		const float rounding     = opt_float(L, 7, 0.f);
+
+		lua_getiuservalue(L, 1, 1);
+		const char* text      = lua_tostring(L, -1);
+		const std::string key = text ? text : "";
+		lua_pop(L, 1);
+
+		auto it = s_images.find(key);
+		if (it == s_images.end()) {
+			std::ifstream file(key.substr(0, key.rfind('|')), std::ios::binary);
+			const std::vector< uint8_t > bytes((std::istreambuf_iterator< char >(file)), std::istreambuf_iterator< char >());
+			it = s_images.emplace(key, lua_image_t{ bytes.empty() ? nullptr : GifTex_Get(("lua:" + key).c_str(), bytes.data(), bytes.size()) }).first;
+		}
+		it->second.m_used = GetTickCount64();
+
+		if (const ImTextureID texture = GifTex_Frame(it->second.m_gif, ImGui::GetTime()))
+			ImGui::GetBackgroundDrawList()->AddImageRounded(texture, ImVec2(x, y), ImVec2(x + w, y + h), ImVec2(0.f, 0.f), ImVec2(1.f, 1.f), color, rounding);
+		return 0;
+	}
+
+	int l_image_size(lua_State* L)
+	{
+		const image_ref_t* image = check_image(L);
+		lua_pushinteger(L, image->m_width);
+		lua_pushinteger(L, image->m_height);
 		return 2;
 	}
 
@@ -2236,6 +2329,19 @@ int n_lua_api::traceback(lua_State* L)
 	return 1;
 }
 
+void n_lua_api::image_sweep()
+{
+	static unsigned long long swept = 0;
+	const unsigned long long now = GetTickCount64();
+	if (now - swept < 1000) return;
+	swept = now;
+	for (auto it = s_images.begin(); it != s_images.end();) {
+		if (now - it->second.m_used < 10000) { ++it; continue; }
+		if (it->second.m_gif) GifTex_Erase(("lua:" + it->first).c_str());
+		it = s_images.erase(it);
+	}
+}
+
 void n_lua_api::push_cmd(lua_State* L) { lua_newuserdatauv(L, 1, 0); luaL_setmetatable(L, k_cmd_meta); }
 void n_lua_api::push_event(lua_State* L) { lua_newuserdatauv(L, 1, 0); luaL_setmetatable(L, k_event_meta); }
 void n_lua_api::push_draw(lua_State* L)
@@ -2410,8 +2516,12 @@ void n_lua_api::open(lua_State* L)
 		                                { "line", l_render_line }, { "rect", l_render_rect }, { "rect_filled", l_render_rect_filled },
 		                                { "gradient", l_render_gradient }, { "circle", l_render_circle }, { "circle_filled", l_render_circle_filled },
 		                                { "triangle", l_render_triangle }, { "poly", l_render_poly }, { "world_to_screen", l_render_world_to_screen },
+		                                { "load_image", l_render_load_image }, { "image", l_render_image },
 		                                { nullptr, nullptr } };
 	add_table(L, "render", render);
+
+	static const luaL_Reg image_methods[] = { { "size", l_image_size }, { nullptr, nullptr } };
+	new_meta(L, k_image_meta, image_methods, nullptr);
 
 	static const luaL_Reg entities[] = { { "local_player", l_entities_local }, { "get", l_entities_get }, { "from_handle", l_entities_from_handle },
 		                                  { "highest_index", l_entities_highest_index }, { "players", l_entities_players }, { "by_class", l_entities_by_class },

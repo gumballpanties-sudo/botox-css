@@ -430,6 +430,7 @@ void n_lua::impl_t::on_paint()
 		std::error_code ec;
 		std::filesystem::create_directories(this->folder() / "settings", ec);
 		std::filesystem::create_directories(this->folder() / "lib", ec);
+		std::filesystem::create_directories(this->folder() / "images", ec);
 
 		this->refresh();
 
@@ -532,6 +533,7 @@ void n_lua::impl_t::on_paint()
 
 	this->m_draw_model_live = any_callback("draw_model");
 
+	n_lua_api::image_sweep();
 	n_lua_api::s_in_paint = true;
 	dispatch("paint", no_args);
 	n_lua_api::s_in_paint = false;
