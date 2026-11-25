@@ -560,6 +560,22 @@ static void PrimordialFrame(ImDrawList* dl, const ImVec2& pos, const ImVec2& siz
     dl->PopClipRect();
 }
 
+// csgo menu.cpp aventum_frame (aventum window render +0x23ebb0 -> +0x23da10): 4 one-px strips on the ring just outside
+// the window, accent at the top-left + bottom-right corners fading to 22 (top l->r, right b->t, left t->b, bottom r->l),
+// then (33,33,33) @ alpha*.5 outline on the same ring
+static void AventumFrame(ImDrawList* dl, const ImVec2& pos, const ImVec2& size)
+{
+    const ImVec2 mn(pos.x - 1.f, pos.y - 1.f), mx(pos.x + size.x + 1.f, pos.y + size.y + 1.f);
+    const ImU32 a = ImGui::GetColorU32(ImGuiCol_Accent), g = IM_COL32(22, 22, 22, 255);
+    dl->PushClipRect(mn, mx, false);
+    dl->AddRectFilledMultiColor(mn, ImVec2(mx.x, mn.y + 1.f), a, g, g, a);
+    dl->AddRectFilledMultiColor(ImVec2(mx.x - 1.f, mn.y), mx, g, g, a, a);
+    dl->AddRectFilledMultiColor(mn, ImVec2(mn.x + 1.f, mx.y), a, a, g, g);
+    dl->AddRectFilledMultiColor(ImVec2(mn.x, mx.y - 1.f), mx, g, a, a, g);
+    dl->AddRect(mn, mx, IM_COL32(33, 33, 33, 127));
+    dl->PopClipRect();
+}
+
 static void SearchBox(float x, float& topY, bool canClick, float dt)
 {
     ImDrawList* dl = ImGui::GetWindowDrawList();
@@ -939,6 +955,7 @@ void RenderMenu()
     RenderFadedGradientLine(dl, ImVec2(wp.x, botY), ImVec2(wz.x, 1.f), ImColor(Accent()));
     if (MenuStyleGamesense(g_menuStyle)) GamesenseFrame(dl, wp, wz);
     if (MenuStylePrimordial(g_menuStyle)) PrimordialFrame(dl, wp, wz, mf::kHeaderH);
+    if (MenuStyleAventum(g_menuStyle)) AventumFrame(dl, wp, wz);
 
     // ---- title: "botox" bold white, then " | <date>" regular accent, same baseline,
     // centred as one unit in the top band.

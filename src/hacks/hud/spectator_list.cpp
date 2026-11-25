@@ -7,6 +7,7 @@
 #include "avatar_cache.h"
 #include "avatar_pure.h"   // n_avatar::FriendIdToSteam64
 #include "spec_pure.h"     // Utf8Truncate, UrlDirect, UrlHash, MakeEyeLayout (tests/specpure_test.cpp)
+#include "vgui_font.h"     // requiem: vgui Win32Font text
 #include "gif_tex.h"
 #include "../screen/blur_rect.h"
 #include "../menu/menu.h"          // ImGui::Label (path input status)
@@ -2624,6 +2625,245 @@ static void DrawDatashell(ImDrawList* dl)
     }
 }
 
+// requiem's built-in bot avatar (VA 0x102a2fa8, 32x32 white "?" on #222222) as drawn: 16x16. vgui DrawSetTextureRGBA =
+// point sampled (MatSystemSurface k_ETextureScalingPointSample), so px (k, j) = source texel (2k + 1, 2j + 1). grey, alpha 255
+static constexpr unsigned char kRequiemBotAvatar[16 * 16] = {
+     34,  34,  34,  34,  34,  34,  34,  34,  34,  34,  34,  34,  34,  34,  34,  34,
+     34,  34,  34,  34,  34,  34,  34,  34,  34,  34,  34,  34,  34,  34,  34,  34,
+     34,  34,  34,  34,  34,  34,  34,  34,  34,  34,  34,  34,  34,  34,  34,  34,
+     34,  34,  34,  34,  34,  34,  34, 138,  34,  34,  34,  34,  34,  34,  34,  34,
+     34,  34,  34,  34,  34,  97, 255, 255, 255, 255,  34,  34,  34,  34,  34,  34,
+     34,  34,  34,  34,  34, 255, 255,  34,  34, 255,  34,  34,  34,  34,  34,  34,
+     34,  34,  34,  34,  34,  34,  34,  34,  34, 255,  34,  34,  34,  34,  34,  34,
+     34,  34,  34,  34,  34,  34,  34,  34, 255, 255,  34,  34,  34,  34,  34,  34,
+     34,  34,  34,  34,  34,  34,  34, 255, 255,  34,  34,  34,  34,  34,  34,  34,
+     34,  34,  34,  34,  34,  34,  34, 255,  34,  34,  34,  34,  34,  34,  34,  34,
+     34,  34,  34,  34,  34,  34,  34,  34,  34,  34,  34,  34,  34,  34,  34,  34,
+     34,  34,  34,  34,  34,  34,  34, 255,  34,  34,  34,  34,  34,  34,  34,  34,
+     34,  34,  34,  34,  34,  34,  34,  34,  34,  34,  34,  34,  34,  34,  34,  34,
+     34,  34,  34,  34,  34,  34,  34,  34,  34,  34,  34,  34,  34,  34,  34,  34,
+     34,  34,  34,  34,  34,  34,  34,  34,  34,  34,  34,  34,  34,  34,  34,  34,
+     34,  34,  34,  34,  34,  34,  34,  34,  34,  34,  34,  34,  34,  34,  34,  34,
+};
+
+// IClientNetworkable::IsDormant = slot 8 (world_fx3.cpp Dormant, live); no networkable = dormant
+static __declspec(noinline) bool EntDormant(int idx)
+{
+    void* net = g_entityList ? VCall<void*>(g_entityList, 0, idx) : nullptr;
+    if (!net) return true;
+    bool d = true;
+    __try { d = VCall<bool>(net, 8); } __except (EXCEPTION_EXECUTE_HANDLER) { d = true; }
+    return d;
+}
+
+static bool s_alwaysShowCfg = false;   // g_specAlwaysShow before the menu-open force (RenderSpectatorList)
+
+// style 36: requiem -- requiem.dll FUN_10049600 (RVA 0x49600), botox csgo / tf2 style 37. vgui Tahoma 12 weight 100
+// drop shadow (hA = "A" tall = 13). W = clamp(screen / 8.7, 170, 300), H = 68 (n <= 1) else 68 + (n - 1) * (hA + 4).
+// frame: fill 200, ring 150, white 8 ring, again 5 in; "spectators (n)" centred at y + 10; accent 2 px + accent - 25
+// 2 px bars; black list box + white 8 ring; rows every hA + 4 from y + 27 + hA: 16 px avatar (bots = requiem's "?"),
+// lowercased name clipped at x + W - 16. donor listing = everyone whose observer target is us, or our target when we
+// are dead (us included), no bot / SourceTV filter; show targets = every spectator + " -> target". always show = donor
+// style "always on", off = "when someone spectating" (alpha +-0.05 per 10 ms).
+static n_vgui::font_t s_requiemFont("Tahoma", 12, 100, n_vgui::k_dropshadow);
+static void DrawRequiem(ImDrawList* dl, ImGuiIO& io)
+{
+    const bool showTarget = g_specShowTarget;
+
+    // donor focus: us; dead (m_lifeState != 0) and watching a player that is not dormant -> them
+    int focus = GetLocalPlayerIndex();
+    int life = 0;
+    if (void* pLocal = GetClientEntity(focus); pLocal && g_offLifeState > 0 && ReadLife(pLocal, life) && life != 0)
+        if (const int t = LocalObserverTarget(); t > 0 && !EntDormant(t)) focus = t;
+
+    // donor loop is i < maxClients: the last player slot is never listed
+    const int maxClients = g_engine ? VCall<int>(g_engine, 21) : 0;   // IVEngineClient::GetMaxClients (sdk 2013 cdll_int.h)
+    std::vector<SpecEntry> entries;
+    Collect(entries, true, true);
+    entries.erase(std::remove_if(entries.begin(), entries.end(), [&](const SpecEntry& e) {
+        return e.index >= maxClients || (!showTarget && e.targetIndex != focus);
+    }), entries.end());
+    SortByIndex(entries);
+    const int n = (int)entries.size();
+
+    // donor alpha a (.data 0x102a55f0, starts 1.0): style 0 snaps to in game || menu, style 1 steps once per > 10 ms of realtime
+    static float a = 1.f;
+    static double last = 0.0;
+    if (s_alwaysShowCfg) a = (IsInGame() || g_showMenu) ? 1.f : 0.f;
+    else if (const double now = ImGui::GetTime(); now - last > 0.01) {
+        last = now;
+        a = ImClamp(a + ((n == 0 && !g_showMenu) ? -0.05f : 0.05f), 0.f, 1.f);
+    }
+    if (a == 0.f) return;
+
+    const int frame = ImGui::GetFrameCount();
+    const int hA = n_vgui::text(s_requiemFont, "A", frame).tall;
+    if (!hA) return;
+    const int W = std::clamp((int)(io.DisplaySize.x / 8.7f), 170, 300);
+    const int H = n < 1 ? 68 : 68 + (n - 1) * (hA + 4);
+    float px, py; Place((float)W, (float)H, px, py);
+    const int x = (int)px, y = (int)py;
+
+    const auto A = [&](int k) { return (int)(a * (float)k); };
+    const ImVec4 acc = ImGui::GetStyleColorVec4(ImGuiCol_Accent);
+    const int ar = (int)(acc.x * 255.f), ag = (int)(acc.y * 255.f), ab = (int)(acc.z * 255.f);
+    const ImU32 bg = IM_COL32(0, 0, 0, A(200)), border = IM_COL32(0, 0, 0, A(150)), hi = IM_COL32(255, 255, 255, A(8));
+    const ImU32 list = IM_COL32(0, 0, 0, A(255)), text = IM_COL32(255, 255, 255, A(255));
+    const ImU32 accent = IM_COL32(ar, ag, ab, A(255)), accent2 = IM_COL32((std::max)(ar - 25, 0), (std::max)(ag - 25, 0), (std::max)(ab - 25, 0), A(255));
+
+    // vgui DrawFilledRect fills [x0, x1) x [y0, y1); DrawOutlinedRect = 1 px on the inside of that box
+    const auto fill = [&](int x0, int y0, int x1, int y1, ImU32 c) { dl->AddRectFilled(ImVec2((float)x0, (float)y0), ImVec2((float)x1, (float)y1), c); };
+    const auto ring = [&](int x0, int y0, int x1, int y1, ImU32 c) { dl->AddRect(ImVec2((float)x0, (float)y0), ImVec2((float)x1, (float)y1), c, 0.f, 0, 1.f); };
+    const auto print = [&](const n_vgui::text_t& t, int tx, int ty, ImU32 c, int cx0 = INT_MIN, int cy0 = INT_MIN, int cx1 = INT_MAX, int cy1 = INT_MAX) {
+        n_vgui::draw(t, tx, ty, c, [&](int x0, int y0, int x1, int y1, uint32_t col) { fill(x0, y0, x1, y1, col); }, cx0, cy0, cx1, cy1);
+    };
+
+    fill(x, y, x + W, y + H, bg);
+    ring(x, y, x + W, y + H, border);
+    ring(x + 1, y + 1, x + W - 1, y + H - 1, hi);
+    fill(x + 5, y + 5, x + W - 5, y + H - 5, bg);
+    ring(x + 5, y + 5, x + W - 5, y + H - 5, border);
+    ring(x + 6, y + 6, x + W - 6, y + H - 6, hi);
+
+    // "spectators" + "(" + n + ")", no space (0x1004a0cd..0x1004a1ca)
+    const n_vgui::text_t& header = n_vgui::text(s_requiemFont, n ? "spectators(" + std::to_string(n) + ")" : std::string("spectators"), frame);
+    print(header, (int)((float)(x + 5) + (float)(W - 10) * 0.5f) - header.wide / 2, y + 10, text);
+
+    fill(x + 11, y + 10 + hA, x + W - 11, y + 12 + hA, accent);
+    fill(x + 11, y + 12 + hA, x + W - 11, y + 14 + hA, accent2);
+    fill(x + 11, y + 21 + hA, x + W - 11, y + H - 10, list);
+    ring(x + 12, y + 22 + hA, x + W - 12, y + H - 11, hi);
+
+    for (int i = 0; i < n; ++i) {
+        const SpecEntry& e = entries[i];
+        const int ry = y + 27 + hA + i * (hA + 4);
+
+        // avatar before the clip (never clipped), 32 px steam small avatar drawn at 16 point sampled, tinted text colour
+        if (g_specAvatar) {
+            if (!e.sid) {
+                for (int j = 0; j < 16; ++j)
+                    for (int k = 0; k < 16;) {
+                        int end = k + 1;
+                        const unsigned char v = kRequiemBotAvatar[j * 16 + k];
+                        while (end < 16 && kRequiemBotAvatar[j * 16 + end] == v) ++end;
+                        fill(x + 16 + k, ry - 2 + j, x + 16 + end, ry - 1 + j, IM_COL32(v, v, v, A(255)));
+                        k = end;
+                    }
+            }
+            else if (ImTextureID tex = Avatar(e.sid)) {
+                dl->AddCallback([](const ImDrawList*, const ImDrawCmd*) {
+                    g_d3dDev->SetSamplerState(0, D3DSAMP_MINFILTER, D3DTEXF_POINT);
+                    g_d3dDev->SetSamplerState(0, D3DSAMP_MAGFILTER, D3DTEXF_POINT);
+                }, nullptr);
+                dl->AddImage(tex, ImVec2((float)(x + 16), (float)(ry - 2)), ImVec2((float)(x + 32), (float)(ry + 14)), ImVec2(0, 0), ImVec2(1, 1), text);
+                dl->AddCallback(ImDrawCallback_ResetRenderState, nullptr);
+            }
+        }
+
+        std::string name = RowText(e);
+        for (char& c : name) if (c >= 'A' && c <= 'Z') c = (char)(c + 32);   // CRT tolower per byte, "C" locale
+        print(n_vgui::text(s_requiemFont, name, frame), x + 36, ry, text, x + 16, ry, x + W - 16, ry + (H - 31 - hA));
+    }
+}
+
+// style 37: primordial -- primordial.bin spectator window 0x40766120, draw 0x40191da0, collector 0x4018f9c0 (botox csgo /
+// tf2 style 38). Tahoma 13 FreeType Monochrome (font #1 rows, #5 title: same face), every text with the font's 0x80 drop
+// shadow (+1, +1, same alpha). W = max(150, widest row + 12), H = header (13 + 5) + 12 + 13 n. 1 px black r5 ring outside,
+// (45) r5 header band, (36) r5 body clipped below the header, rows (200) at (x + 6, y + header + 5 + 13 i), title
+// "spectators" / "spectators (n)" centred at y + 2, 1 px accent line at y + header - 1. bg alpha (1 - transparency) * e,
+// text + line e, e = 0.5 (sin((t - 0.5) pi) + 1), t +-5 / s. donor listing: watchers of our view (us; dead + in eye /
+// chase -> our target), bots + SourceTV (fake clients) skipped, names cut at 18 bytes + "...". show targets = donor
+// "Show All" (every spectator, " -> name" / " -> YOU", our-view rows accent), observer mode = donor "Show Mode".
+static void DrawPrimordial(ImDrawList* dl, ImGuiIO& io)
+{
+    ImFont* font = Font(g_fontPrimordialTahoma13);
+    const bool showAll = g_specShowTarget, showMode = g_specBhopMode;
+
+    std::vector<SpecEntry> entries;
+    Collect(entries, true, false);   // also resolves the observer netvars
+
+    // donor view (0x4017f2b0): us; dead and in eye / chase -> the player we watch
+    const int localIdx = GetLocalPlayerIndex();
+    int view = localIdx;
+    if (void* pLocal = GetClientEntity(localIdx); pLocal && s_offObsMode > 0) {
+        int mode = 0, life = 0;
+        unsigned int handle = 0xFFFFFFFFu;
+        if (ReadObsState(pLocal, mode, handle, life) && life != 0 && (mode == OBS_IN_EYE || mode == OBS_CHASE))
+            if (const int t = LocalObserverTarget(); t > 0) view = t;
+    }
+    entries.erase(std::remove_if(entries.begin(), entries.end(), [&](const SpecEntry& e) { return e.fake || (!showAll && e.targetIndex != view); }), entries.end());
+    SortByIndex(entries);
+
+    // donor m_iObserverMode text (csgo order); the sdk 2013 point-of-interest mode has no donor text -> ""
+    const auto modeText = [](int m) -> const char* {
+        switch (m) {
+        case OBS_DEATHCAM:  return "death cam";
+        case OBS_FREEZECAM: return "freeze cam";
+        case OBS_FIXED:     return "fixed";
+        case OBS_IN_EYE:    return "in eye";
+        case OBS_CHASE:     return "chase";
+        case OBS_ROAMING:   return "roaming";
+        default:            return "";
+        }
+    };
+    const auto cut = [](const std::string& s) { return s.size() > 18 ? s.substr(0, 18) + "..." : s; };   // 0x4047e3b0, bytes
+    struct Row { std::string text; bool view; };
+    std::vector<Row> rows;
+    for (const SpecEntry& e : entries) {
+        std::string s = cut(e.name);
+        if (showAll) s += " -> " + (e.targetIndex == view ? std::string("YOU") : cut(e.target));
+        if (showMode) s += std::string(" (") + modeText(e.obsMode) + ")";
+        rows.push_back({ std::move(s), e.targetIndex == view });
+    }
+    const int n = (int)rows.size();
+
+    // window anim (0x4045f210): visible = in game || menu (+ the overlay's always show for an empty list)
+    static float t = 0.f;
+    const bool visible = (IsInGame() || g_showMenu) && (n > 0 || g_specAlwaysShow);
+    t = ImClamp(t + (visible ? 1.f : -1.f) * io.DeltaTime * 5.f, 0.f, 1.f);
+    if (t == 0.f) return;
+    const float e = 0.5f * (float)(sin(((double)t - 0.5) * 3.14159265358979323846) + 1.0);
+
+    const auto size = [&](const std::string& s) { const ImVec2 v = font->CalcTextSizeA(font->FontSize, FLT_MAX, 0.f, s.c_str()); return ImVec2((float)(int)v.x, (float)(int)v.y); };
+    const int fh = (int)size("ABCDEF").y;                                     // font + 0xC line height = 13
+    const int header = (g_specPrimordialNoHeader && !g_showMenu) ? 0 : fh + 5;   // window ctor: font #5 height + 5
+    int W = 150;
+    for (const Row& r : rows) W = (std::max)(W, (int)size(r.text).x + 12);
+    const int H = header + 12 + n * fh;
+
+    float px, py; Place((float)(W + 2), (float)(H + 2), px, py);   // + the 1 px ring outside the box
+    const int x = (int)px + 1, y = (int)py + 1;
+
+    // every primitive: alpha byte = trunc(a * global alpha), rgb untouched
+    const auto mul = [](ImU32 c, float m) { return (c & ~IM_COL32_A_MASK) | ((ImU32)(int)((float)(c >> IM_COL32_A_SHIFT) * m) << IM_COL32_A_SHIFT); };
+    const ImU32 accent = ImGui::ColorConvertFloat4ToU32(ImGui::GetStyleColorVec4(ImGuiCol_Accent));
+    const float bgA = (1.f - ImClamp(g_specPrimordialTransparency, 0.f, 100.f) * 0.01f) * e;
+    const auto rect = [&](int x0, int y0, int x1, int y1, ImU32 c, float r) { dl->AddRectFilled(ImVec2((float)x0, (float)y0), ImVec2((float)x1, (float)y1), c, r); };
+    const auto text = [&](float tx, float ty, ImU32 c, const std::string& s) {   // 0x40475c50: shadow first, same alpha
+        dl->AddText(font, font->FontSize, ImVec2(tx + 1.f, ty + 1.f), mul(IM_COL32(0, 0, 0, c >> IM_COL32_A_SHIFT), e), s.c_str());
+        dl->AddText(font, font->FontSize, ImVec2(tx, ty), mul(c, e), s.c_str());
+    };
+
+    rect(x - 1, y - 1, x + W + 1, y + H + 1, mul(IM_COL32(0, 0, 0, 255), bgA), 5.f);
+    rect(x, y, x + W, y + H, mul(IM_COL32(45, 45, 45, 255), bgA), 5.f);
+    dl->PushClipRect(ImVec2((float)(x - 1), (float)(y + header)), ImVec2((float)(x + W + 1), (float)(y + header + H + 1)), true);
+    rect(x, y, x + W, y + H, mul(IM_COL32(36, 36, 36, 255), bgA), 5.f);
+    for (int i = 0; i < n; ++i) {   // align 3: y centre int(i * fh + header + 6 + fh / 2), minus roundf(th / 2)
+        const float cy = (float)(y + (int)((float)(i * fh + header + 6) + (float)fh * 0.5f));
+        text((float)(x + 6), (float)(int)(cy - roundf(size(rows[i].text).y * 0.5f)), (showAll && rows[i].view) ? accent : IM_COL32(200, 200, 200, 255), rows[i].text);
+    }
+    dl->PopClipRect();
+
+    if (header) {   // align 5 at (x + int(W / 2), y + int(header / 2))
+        const std::string title = n == 0 ? std::string("spectators") : "spectators (" + std::to_string(n) + ")";
+        const ImVec2 ts = size(title);
+        const float tx = (float)(int)((float)(x + (int)(W * 0.5f)) - roundf(ts.x * 0.5f));
+        const float ty = (float)(int)((float)(y + (int)(header * 0.5f)) - roundf(ts.y * 0.5f));
+        text(tx, ty, IM_COL32(200, 200, 200, 255), title);
+        rect(x, y + header - 1, x + W, y + header, mul(accent, e), 0.f);
+    }
+}
+
 // ==== drag + dispatch ==========================================================================
 // Styles that hardcode their x/y instead of calling Place(); SpecDrag shifts the vertices they added
 // (none of them push a clip rect or a BlurRect).
@@ -2733,6 +2973,8 @@ static void DrawStyle(ImDrawList* dl, ImGuiIO& io)
     case 33: DrawHotwheelsV1(dl);       break;
     case 34: DrawGrimoire(dl);          break;
     case 35: DrawDatashell(dl);         break;
+    case 36: DrawRequiem(dl, io);       break;
+    case 37: DrawPrimordial(dl, io);    break;
     default: break;
     }
 }
@@ -2745,6 +2987,7 @@ void RenderSpectatorList()
     // so the cfg never saves the force.
     bool* const flags[3] = { &g_specAlwaysShow, &g_specClarityAlwaysShow, &g_specKbAlwaysShow };
     bool saved[3] = { *flags[0], *flags[1], *flags[2] };
+    s_alwaysShowCfg = saved[0];   // requiem tells its two visibility styles apart by the real setting
     const bool force = g_showMenu;
     if (force) for (bool* f : flags) *f = true;
 

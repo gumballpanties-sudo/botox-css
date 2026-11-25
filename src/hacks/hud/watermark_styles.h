@@ -19,6 +19,8 @@
 //  11 interium   droid bold 24 @ 16   22 boxed       arialbd 16
 //                                     23 grimoire    tahomabd 11 mono
 //                                     24 datashell   verdanab 12 mono
+//                                     25 requiem     vgui Tahoma 12 w500 outline (vgui_font.h)
+//                                     26 primordial  tahoma 13 Monochrome
 // Accent = the menu accent (ImGuiCol_Accent), as in botox. Sets g_wmBox.
 void Watermark_Draw();
 

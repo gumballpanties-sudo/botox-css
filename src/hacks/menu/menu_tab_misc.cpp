@@ -23,10 +23,11 @@ static void Page_MiscMain()
                 void GifTex_PathInput(const char*, const char*, char*, size_t);   // hud/gif_tex.cpp
 
                 int& style = g_wmStyle;
-                if (style < 0 || style > 24) style = 0;
+                if (style < 0 || style > 26) style = 0;
                 ImGui::Combo("style##watermark style", &style,
                     "default\0kamibebra\0clarity\0clarity v2\0delusional\0interwebz\0havoc\0onetap\0airflow\0ev0lve\0legendware\0"
-                    "interium\0skebob\0cumidere\0illusory\0lumi\0billware\0dna\0dna clarity\0cucumber\0howeweware\0gamesense\0boxed\0grimoire\0datashell\0");
+                    "interium\0skebob\0cumidere\0illusory\0lumi\0billware\0dna\0dna clarity\0cucumber\0howeweware\0gamesense\0boxed\0grimoire\0datashell\0"
+                    "requiem\0primordial\0");
 
                 ImGui::InputTextWithHint("name##watermark text", "botox", g_wmLabel, 25);
 
@@ -88,7 +89,7 @@ static void Page_MiscMain()
 
                 const bool showsUser = ((style == 0 || style == 2 || style == 15 || style == 21 || style == 23) && g_wmUser) || style == 12 ||
                                        (style == 1 && (g_wmKamiShowFlags & 1)) || style == 3 || style == 8 || style == 10 ||
-                                       style == 17 || style == 18 || style == 19 || style == 20 || (labelStyle && label == 2);
+                                       style == 17 || style == 18 || style == 19 || style == 20 || style == 26 || (labelStyle && label == 2);
                 if (showsUser)
                     ImGui::InputTextWithHint("user name##watermark clarity user", "user", g_wmUserName, sizeof(g_wmUserName));
 
@@ -209,14 +210,16 @@ static void Page_MiscMain()
                 if (cs == 0 || cs == 5 || cs == 8 || cs == 23 || cs == 24 || cs == 26 || cs == 29 || cs == 30 || cs == 31 || cs == 32 || lumiType == 2)
                     ImGui::ColorRow("spectating other color##spectator list text color two", g_specColorTwo, kA);
                 if (cs != 9 && cs != 12 && cs != 13 && cs != 14 && cs != 16 && cs != 18 && cs != 19 && cs != 20 && cs != 21 && cs != 24 &&
-                    cs != 26 && cs != 28 && cs != 29 && cs != 30 && cs != 31 && cs != 33 && cs != 34 && cs != 35 && (cs != 25 || lumiType == 1))
+                    cs != 26 && cs != 28 && cs != 29 && cs != 30 && cs != 31 && cs != 33 && cs != 34 && cs != 35 && cs != 36 && cs != 37 &&
+                    (cs != 25 || lumiType == 1))
                     ImGui::Combo("listed players##spectatorlist player", &g_specListType, "all spectators\0local spectators\0");
 
-                if (g_specStyle > 35 || g_specStyle < 0) g_specStyle = 0;
+                if (g_specStyle > 37 || g_specStyle < 0) g_specStyle = 0;
                 ImGui::Combo("style##spectatorlist style", &g_specStyle,
                     "default\0delusional\0interwebz\0windows xp\0clarity\0chillware\0lobotomy v2\0kamibebra\0eyes\0cumhacck\0clarity v2\0"
                     "airplane\0bhop cheat\0millionware\0aimware\0havoc\0onetap\0airflow\0ev0lve\0legendware\0interium\0chillware v2\0"
-                    "skebob\0cumidere\0illusory\0lumi\0billware\0inkabanium\0dna\0cucumber\0howeweware\0gamesense\0kamidere\0hotwheels v1\0grimoire\0datashell\0");
+                    "skebob\0cumidere\0illusory\0lumi\0billware\0inkabanium\0dna\0cucumber\0howeweware\0gamesense\0kamidere\0hotwheels v1\0grimoire\0datashell\0"
+                    "requiem\0primordial\0");
                 const int style = g_specStyle;
 
                 if (style == 25) {
@@ -224,7 +227,8 @@ static void Page_MiscMain()
                     ImGui::Combo("type##spectatorlist lumi type", &g_specLumiType, "default\0new\0interwebz\0");
                 }
                 if (style == 1 || style == 2 || style == 3 || style == 15 || style == 22 || style == 23 || style == 24 || style == 26 || style == 28 ||
-                    style == 29 || style == 30 || style == 31 || style == 32 || style == 33 || style == 34 || style == 35 || (style == 25 && g_specLumiType != 1))
+                    style == 29 || style == 30 || style == 31 || style == 32 || style == 33 || style == 34 || style == 35 || style == 36 || style == 37 ||
+                    (style == 25 && g_specLumiType != 1))
                     ImGui::Checkbox("show targets##spectatorlist targets", &g_specShowTarget);
                 if (style == 22) {
                     ImGui::Checkbox("draw background##spectatorlist skebob", &g_specSkebobBg);
@@ -232,8 +236,13 @@ static void Page_MiscMain()
                 }
                 if ((style == 0 && g_specListType == 0) || style == 4 || style == 5 || style == 6 || style == 11 || style == 15 || style == 17 ||
                     style == 18 || style == 21 || style == 22 || style == 23 || style == 25 || style == 26 || style == 27 || style == 28 ||
-                    style == 29 || style == 30 || style == 31 || style == 32 || style == 33 || style == 34 || style == 35)
+                    style == 29 || style == 30 || style == 31 || style == 32 || style == 33 || style == 34 || style == 35 || style == 36 || style == 37)
                     ImGui::Checkbox("always show##spectatorlist always show", &g_specAlwaysShow);
+                if (style == 37) {   // primordial "Show Mode" / "Transparency" / "Disable Header"
+                    ImGui::Checkbox("observer mode##spectatorlist primordial", &g_specBhopMode);
+                    ImGui::SliderFloat("transparency##spectatorlist primordial", &g_specPrimordialTransparency, 0.f, 100.f, "%.0f");
+                    ImGui::Checkbox("disable header##spectatorlist primordial", &g_specPrimordialNoHeader);
+                }
                 if (style == 33)
                     ImGui::SliderFloat("gap##spectatorlist hotwheels", &g_specHotwheelsGap, 0.f, 20.f, "%.0f px");
                 if (style == 35)
@@ -325,7 +334,7 @@ static void Page_MiscMain()
                 if (style == 12)
                     ImGui::Checkbox("observer mode##spectatorlist bhopcheat mode", &g_specBhopMode);
                 if ((style < 13 && style != 8 && style != 9 && style != 11) || style == 22 || style == 31 || style == 32 || style == 33 || style == 34 ||
-                    (style == 25 && g_specLumiType != 2))
+                    style == 36 || (style == 25 && g_specLumiType != 2))
                     ImGui::Checkbox("spectator avatars", &g_specAvatar);
                 if (style == 10)
                     ImGui::Checkbox("always show##spectatorlist clarity v2", &g_specClarityAlwaysShow);

@@ -157,6 +157,7 @@ struct MenuStyleRow
     bool gamesense = false;  // skeet frame + gradient bar over the window (menu.cpp GamesenseFrame), layout untouched
     bool primordial = false; // black 180 outer line + solid accent line (menu.cpp PrimordialFrame), scrollbar colours
     bool clarity = false;    // scrollbar grab 31, no track
+    bool aventum = false;    // 1 px accent -> 22 gradient ring + 33 @ .5 outline outside the window (menu.cpp AventumFrame)
 };
 
 static const MenuStyleRow k_menuStyles[] = {
@@ -191,6 +192,15 @@ static const MenuStyleRow k_menuStyles[] = {
       IM_COL32(41, 41, 41, 255), IM_COL32(41, 41, 41, 255), IM_COL32(29, 29, 29, 255), IM_COL32(210, 210, 210, 255),
       IM_COL32(127, 127, 127, 255), 9.f, 2.f, 2.f, []() -> ImFont* { return g_fontPrimordialRoboto13; },
       []() -> ImFont* { return g_fontPrimordialRobotoMedium13; }, false, true },
+    // csgo menu.cpp "aventum" row: aventum.dll gui palette .data 0x34c3cab8..cb20, rounding 0 everywhere: window 16,
+    // group 19 + title + accent line on it (band = child), widget base 23 (checkbox / slider grad 51 -> 23, button 23 /
+    // hover 51), outline 33 (group ring is 22), combo list 19, idle label 149 = textDim (text 255 @ .5 on 19 = 137),
+    // active label = accent there (widget body, not a row colour). Ring outside the window = AventumFrame, so its inner
+    // border is off (alpha 0). One font for every string, both slots.
+    { "aventum", IM_COL32(16, 16, 16, 255), IM_COL32(19, 19, 19, 255), IM_COL32(19, 19, 19, 255), IM_COL32(23, 23, 23, 255),
+      IM_COL32(33, 33, 33, 255), IM_COL32(0, 0, 0, 0), IM_COL32(19, 19, 19, 255), IM_COL32(255, 255, 255, 255),
+      IM_COL32(149, 149, 149, 255), 0.f, 0.f, 0.f, []() -> ImFont* { return g_fontAventumVerdana14; },
+      []() -> ImFont* { return g_fontAventumVerdana14; }, false, false, false, true },
 };
 static const int k_menuStyleCount = (int)(sizeof(k_menuStyles) / sizeof(k_menuStyles[0]));
 
@@ -235,6 +245,7 @@ int MenuStyleCount() { return k_menuStyleCount; }
 void MenuStyleApplyAt(int i) { MenuStyleApply(k_menuStyles[i]); }
 bool MenuStyleGamesense(int i) { return k_menuStyles[i].gamesense; }
 bool MenuStylePrimordial(int i) { return k_menuStyles[i].primordial; }
+bool MenuStyleAventum(int i) { return k_menuStyles[i].aventum; }
 
 // botox tab_settings: col1 "config" + "system", col2 "visuals config" + "menu". Left out, no
 // TF2 counterpart: "botox network" (no TF2 server).

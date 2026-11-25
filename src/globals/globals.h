@@ -63,6 +63,8 @@ extern ImFont* g_fontKamibebra13;        // rubik_regular 13  Bitmap
 extern ImFont* g_fontKamibebraBold13;    // rubik_medium 13  Bitmap|LightHinting
 extern ImFont* g_fontPrimordialRoboto13;       // primordial_roboto_regular 13  menu theme "primordial"
 extern ImFont* g_fontPrimordialRobotoMedium13; // primordial_roboto_medium 13
+extern ImFont* g_fontPrimordialTahoma13;       // tahoma 13 FreeType Monochrome only (primordial wm / spec / media)
+extern ImFont* g_fontAventumVerdana14;   // verdana 14  Bitmap, cyrillic  menu theme "aventum" (both slots)
 extern ImFont* g_fontCumhacck35;         // verdana bd 35  Monochrome|MonoHinting
 extern ImFont* g_fontAirplaneTitle;      // montserrat_regular 10
 extern ImFont* g_fontAirplaneRows;       // tahoma bd 11  MonoHinting

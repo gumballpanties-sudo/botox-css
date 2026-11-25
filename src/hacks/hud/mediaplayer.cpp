@@ -1357,6 +1357,8 @@ static void StyleFonts(int style, ImFont*& title, ImFont*& artist, float& size)
     case 22: pick(g_fontArialBd16, g_fontArialBd16); break;   // boxed music display face
     case 23: pick(g_fontGrimoireBold11, g_fontGrimoireBold11); break;
     case 24: pick(g_fontDatashellBold12, g_fontDatashellBold12); break;
+    case 25: pick(g_fontTahoma12, g_fontTahoma12); break;                 // requiem spotify panel: vgui Tahoma 12 (bilevel)
+    case 26: pick(g_fontPrimordialTahoma13, g_fontPrimordialTahoma13); break;   // primordial wm face, tahoma 13 Monochrome
     default: break;
     }
     if (!title || !artist) {

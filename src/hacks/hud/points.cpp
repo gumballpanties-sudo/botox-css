@@ -80,6 +80,8 @@ namespace
             case 22: font = g_fontArialBd16; break;
             case 23: font = g_fontGrimoireBold11; break;
             case 24: font = g_fontDatashellBold12; break;
+            case 25: font = g_fontTahoma12; break;   // requiem: vgui Tahoma 12 (bilevel)
+            case 26: font = g_fontPrimordialTahoma13; break;
             default: break;
             }
         }

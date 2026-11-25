@@ -1768,6 +1768,14 @@ static void BuildFontAtlas()
     g_fontPrimordialRoboto13       = donor(primordial_roboto_regular, sizeof(primordial_roboto_regular), 13.f, 0);
     g_fontPrimordialRobotoMedium13 = donor(primordial_roboto_medium, sizeof(primordial_roboto_medium), 13.f, 0);
     orElse(g_fontPrimordialRoboto13, g_fontReg); orElse(g_fontPrimordialRobotoMedium13, g_fontPrimordialRoboto13);
+    // primordial hud font (create_font 0x40471900, fonts #1 + #5): Tahoma 13 weight 400 flags 0x80 = no FONTFLAG_ANTIALIAS ->
+    // FreeType Monochrome alone (no MonoHinting = FT_LOAD_TARGET_NORMAL hinting), not bold. #1's msjh cjk merge not ported
+    g_fontPrimordialTahoma13 = sys("tahoma.ttf", 13.f, flagged(ImGuiFreeTypeBuilderFlags_Monochrome), cyr);
+    orElse(g_fontPrimordialTahoma13, g_fontReg);
+    // aventum.dll gui font slot 0 (every menu string): its embedded verdana = stock verdana.ttf (same checksum), 14 px,
+    // ImFontConfig FontBuilderFlags 0x200 = Bitmap only. Bitmap matters here: nominal size request, not real-dim
+    g_fontAventumVerdana14 = sys("verdana.ttf", 14.f, flagged(ImGuiFreeTypeBuilderFlags_Bitmap), cyr);
+    orElse(g_fontAventumVerdana14, g_fontReg);
 
     g_fontCumhacck35    = sys("verdanab.ttf", 35.f, mono);                   orElse(g_fontCumhacck35, g_fontBold);
     g_fontAirplaneTitle = donor(montserrat_regular, sizeof(montserrat_regular), 10.f, 0); orElse(g_fontAirplaneTitle, g_fontBold);
