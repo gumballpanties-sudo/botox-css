@@ -1760,6 +1760,7 @@ static int  s_esurfPinCmd   = -1;     // g_edge_surf_pin_cmd: last cmd a proven 
 static bool s_esurfSyncWant = false;  // armed: botox sync_arm owner k_sync_es (AS_SyncArm)
 static bool s_esurfPinPrev  = false;  // cmd START: the last cmd sent a proven pin (detections, eb veto)
 static bool s_esurfLatchPrev = false; // cmd START: the last cmd an owned approach went out (detections)
+static bool s_esurfRampStart = false; // cmd START rides a ramp lip (ramp slide): a pin with the slope's vz, never the pin vz
 static bool s_esurfRestored = false;  // edge surf restored the frame this cmd: TextureBug's noteSent resims even with 0 sims
 // edge_surf_latched: an edge surf feet approach owned the last cmd
 static bool ESurf_Latched(const UserCmd_t* cmd)
@@ -2766,6 +2767,7 @@ static void Movement_RunImpl(UserCmd_t* pCmd)
     // probe features: need working prediction + frame-restore sigs (ref RunPost order:
     // PixelSurf ducks first, AutoAlign steers with the crouch active, then TB -> HS -> WC -> AS)
     s_esurfActive = false;   // per cmd: only edge surf owning this cmd (TextureBug) lights it
+    s_esurfRampStart = false;
     if (s_predicted && probesOK)
     {
         if (!bMoveBlocked)   // these MOVE you. The finder below only measures
@@ -2970,7 +2972,7 @@ static void Movement_RunImpl(UserCmd_t* pCmd)
         // an edge surf pin sets tb's hit (its pin is a head pin): edgesurfed, never texturebugged too
         d.tb = s_textureBugHit && !s_esurfActive; d.as = s_airStuckReal; d.ps = s.psHit && !s_esurfActive; d.wc = s_wcLanded;
         d.tbOwns = s_tbOwnsCmd;
-        d.esPhys = d.walk && !d.onGround && fabsf(s_prePredVel.z - TargetPredictZVel()) < 0.05f && s_esurfPinPrev;
+        d.esPhys = d.walk && !d.onGround && (fabsf(s_prePredVel.z - TargetPredictZVel()) < 0.05f || s_esurfRampStart) && s_esurfPinPrev;
         d.esHeld = s_esurfLatchPrev;
         // only an edge surf PIN vetoes edgebugged ( csgo m_texture_bug_now = m_hit ), never a merely owned guide tick
         d.esVeto = (s_esurfActive && s_textureBugHit) || s_esurfPinPrev;

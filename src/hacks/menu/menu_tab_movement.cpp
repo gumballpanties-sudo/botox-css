@@ -281,6 +281,10 @@ static void Page_MovementMain()
                 SliderF("lead range##esurfrange", &g_edgeSurfRange, 8.f, 512.f, "%.0f u");
                 // 0 = straight press into the wall, else air strafe toward it turning this many degrees a tick
                 SliderF("delta strafe##esurfdelta", &g_edgeSurfDeltaStrafe, 0.f, 15.f, "%.2f");
+                // not botox: the same ride on the side lip of a walkable ramp (stair clips, ramp brushes). no friction, gravity speeds it up
+                ImGui::Checkbox("ramp slide##esurframp", &g_edgeSurfRamp);
+                // not botox: on a ledge with the key down it creeps you to the edge and steps off into the ride, no jump
+                ImGui::Checkbox("walk off entry##esurfwalk", &g_edgeSurfWalkOff);
                 ImGui::Checkbox("visualize##esurfviz", &g_edgeSurfViz);
                 ImGui::ColorEdit4("visualize color##esurfvizcolor", g_edgeSurfVizColor,
                     ImGuiColorEditFlags_AlphaBar | ImGuiColorEditFlags_AlphaPreviewHalf | ImGuiColorEditFlags_NoOptions |

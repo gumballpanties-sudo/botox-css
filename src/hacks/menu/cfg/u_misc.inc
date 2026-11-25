@@ -18,6 +18,8 @@
     { "ptsBobSpeed",        CfgEntry::FLOAT,  &g_ptsBobSpeed, 0 },
     { "ptsOffsetX",         CfgEntry::FLOAT,  &g_ptsOffsetX, 0 },
     { "ptsOffsetY",         CfgEntry::FLOAT,  &g_ptsOffsetY, 0 },
+    { "ptsStandalone",      CfgEntry::BOOL,   &g_ptsStandalone, 0 },
+    { "ptsPosition",        CfgEntry::INT,    &g_ptsPosition, 0 },
     { "fpsWarning",         CfgEntry::BOOL,   &g_fpsWarning, 0 },
     { "hmSpeed",            CfgEntry::FLOAT,  &g_hmSpeed, 0 },
     { "hmThickness",        CfgEntry::FLOAT,  &g_hmThickness, 0 },

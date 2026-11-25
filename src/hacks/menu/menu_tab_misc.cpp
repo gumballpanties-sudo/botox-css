@@ -389,8 +389,15 @@ static void Page_MiscMain()
                 ImGui::Checkbox("readout##points", &g_ptsReadout);
                 ImGui::SliderFloat("appear speed##points", &g_ptsAppearSpeed, 0.5f, 20.f, "%.2fx");
                 ImGui::SliderFloat("bob speed##points", &g_ptsBobSpeed, 0.1f, 10.f, "%.2fx");
-                ImGui::SliderFloat("x offset##points", &g_ptsOffsetX, -300.f, 300.f, "%.0f px");
-                ImGui::SliderFloat("y offset##points", &g_ptsOffsetY, -50.f, 50.f, "%.0f px");
+                ImGui::Checkbox("standalone##points", &g_ptsStandalone);
+                if (g_ptsStandalone)
+                {
+                    if (g_ptsPosition < 0 || g_ptsPosition > 7) g_ptsPosition = 0;
+                    ImGui::Combo("position##points", &g_ptsPosition,
+                                 "top right\0top left\0top center\0bottom center\0bottom left\0bottom right\0center left\0center right\0");
+                }
+                ImGui::SliderFloat("x offset##points", &g_ptsOffsetX, g_ptsStandalone ? -1000.f : -300.f, g_ptsStandalone ? 1000.f : 300.f, "%.0f px");
+                ImGui::SliderFloat("y offset##points", &g_ptsOffsetY, g_ptsStandalone ? -600.f : -50.f, g_ptsStandalone ? 600.f : 50.f, "%.0f px");
             }, ImVec2(220.f, -1.f));
 
         ImGui::Checkbox("low fps warning", &g_fpsWarning);

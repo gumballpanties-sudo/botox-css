@@ -25,6 +25,8 @@ inline float g_ptsAppearSpeed      = 1.f;     // m_points_appear_speed
 inline float g_ptsBobSpeed         = 1.f;     // m_points_speed
 inline float g_ptsOffsetX          = 0.f;     // m_points_x_offset
 inline float g_ptsOffsetY          = 0.f;     // m_points_y_offset
+inline bool  g_ptsStandalone       = false;   // m_points_standalone
+inline int   g_ptsPosition         = 0;       // m_points_position ( 0 tr 1 tl 2 tc 3 bc 4 bl 5 br 6 cl 7 cr )
 
 inline bool  g_fpsWarning          = true;    // m_fps_warning
 

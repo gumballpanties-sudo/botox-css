@@ -14,6 +14,8 @@
 { "edgeSurfRange",     CfgEntry::FLOAT,  &g_edgeSurfRange, 0 },
 { "edgeSurfReach",     CfgEntry::FLOAT,  &g_edgeSurfReach, 0 },
 { "edgeSurfDelta",     CfgEntry::FLOAT,  &g_edgeSurfDeltaStrafe, 0 },
+{ "edgeSurfRamp",      CfgEntry::BOOL,   &g_edgeSurfRamp, 0 },
+{ "edgeSurfWalkOff",   CfgEntry::BOOL,   &g_edgeSurfWalkOff, 0 },
 { "edgeSurfViz",       CfgEntry::BOOL,   &g_edgeSurfViz, 0 },
 { "edgeSurfVizColor",  CfgEntry::FLOAT4, g_edgeSurfVizColor, 0 },
 { "edgeBugEdgeSurf",   CfgEntry::BOOL,   &g_edgeBugEdgeSurf, 0 },

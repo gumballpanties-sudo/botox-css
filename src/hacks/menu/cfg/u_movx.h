@@ -30,6 +30,8 @@ inline int   g_edgeSurfMode = 1;
 inline float g_edgeSurfRange = 96.f;         // lead range: ledges scanned under the fall (8-512)
 inline float g_edgeSurfReach = 6.f;          // reach: a beside approach owned inside this gap (0.1-32)
 inline float g_edgeSurfDeltaStrafe = 0.f;    // 0 = straight press into the face, else air strafe turning this many deg a tick
+inline bool  g_edgeSurfWalkOff = false;      // walk off entry (edgesurf_walkoff.h, NOT botox): step off the ledge you stand on into a ride
+inline bool  g_edgeSurfRamp = true;          // ramp slide (edgesurf_ramp.h, NOT botox): the same ride on a walkable ramp's side lip
 inline bool  g_edgeSurfViz = false;          // scanned ledges, the pick, the arrival, the act
 inline float g_edgeSurfVizColor[4] = { 120 / 255.f, 230 / 255.f, 1.f, 1.f };
 inline bool  g_edgeBugEdgeSurf = false;      // edgebug "edgesurf on eb": the eb key arms edge surf's takeover at an eb's pin end

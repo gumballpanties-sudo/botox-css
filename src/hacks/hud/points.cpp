@@ -248,16 +248,34 @@ void RenderPoints()
     const std::string text = std::to_string(shown) + " pts";
     const ImVec2 size = font->CalcTextSizeA(fontSize, FLT_MAX, 0.f, text.c_str());
 
+    const bool standalone = g_ptsStandalone;
     const ImVec4 box   = g_wmBox;
-    const bool hasBox  = box.z > box.x;
+    const bool hasBox  = !standalone && box.z > box.x;
     const int style    = g_wmStyle;
     const bool rightOf = hasBox && (style == 11 || style == 19 || style == 20);
     const bool screen  = !hasBox || style == 5;
 
-    float x = screen ? io.DisplaySize.x - 8.f - size.x : rightOf ? box.z + kGap : box.x - kGap - size.x;
-    float y = (hasBox && !screen ? (box.y + box.w) * 0.5f : 20.f) - size.y * 0.5f;
+    // standalone corner, media player order: 0 tr 1 tl 2 tc 3 bc 4 bl 5 br 6 cl 7 cr. align 0 left 1 center 2 right
+    const int position    = std::clamp(g_ptsPosition, 0, 7);
+    const int align       = !standalone ? 2 : position == 0 || position == 5 || position == 7 ? 2 : position == 1 || position == 4 || position == 6 ? 0 : 1;
+    const bool fromBottom = standalone && position >= 3 && position <= 5;
+    const float sw = io.DisplaySize.x, sh = io.DisplaySize.y;
 
-    const float shiftX = (rightOf ? -offset : offset) + g_ptsOffsetX;
+    float x, y;
+    if (standalone)
+    {
+        constexpr float kMargin = 8.f;
+        x = align == 0 ? kMargin : align == 1 ? (sw - size.x) * 0.5f : sw - kMargin - size.x;
+        y = fromBottom ? sh - kMargin - size.y : position >= 6 ? (sh - size.y) * 0.5f : kMargin;
+    }
+    else
+    {
+        x = screen ? sw - 8.f - size.x : rightOf ? box.z + kGap : box.x - kGap - size.x;
+        y = (hasBox && !screen ? (box.y + box.w) * 0.5f : 20.f) - size.y * 0.5f;
+    }
+
+    // slide out away from the anchor side: left anchored (or right of the watermark) slides left
+    const float shiftX = (rightOf || align == 0 ? -offset : offset) + g_ptsOffsetX;
     const float textBottom = y + size.y + g_ptsOffsetY;
     x += shiftX;
     y += drop + bob + g_ptsOffsetY;
@@ -295,14 +313,16 @@ void RenderPoints()
     }
     std::sort(order, order + count, [&](int a, int b) { return rows[a].order < rows[b].order; });
 
-    // under the watermark, right edge = watermark right (pts left of it) else the pts text
+    // under the watermark, right edge = watermark right (pts left of it) else the pts text.
+    // standalone: rows align with the pts text, bottom corners stack upward
     const ImVec4 gif     = g_wmGifBox;
     const bool hasGif    = gif.z > gif.x;
     const bool underBox  = hasBox && !screen;
-    const float right    = underBox && !rightOf ? (hasGif ? std::max(box.z, gif.z) : box.z) + shiftX : x + size.x;
+    const float anchor   = underBox && !rightOf ? (hasGif ? std::max(box.z, gif.z) : box.z) + shiftX
+                         : align == 0 ? x : align == 1 ? x + size.x * 0.5f : x + size.x;
     float rowY = textBottom;
     if (underBox) rowY = std::max(rowY, (hasGif ? std::max(box.w, gif.w) : box.w) + g_ptsOffsetY);
-    rowY += 3.f;
+    rowY += fromBottom ? -(size.y + 3.f) : 3.f;
 
     const float groupAlpha = fading || revealing ? alpha : 1.f;
     const float rowSize    = g_ptsBigFont ? fontSize * 0.72f : fontSize;
@@ -331,8 +351,10 @@ void RenderPoints()
         const float multW      = mult.empty() ? 0.f : font->CalcTextSizeA(multSize, FLT_MAX, 0.f, mult.c_str()).x + space;
         const float gainW      = font->CalcTextSizeA(rowSize, FLT_MAX, 0.f, gain.c_str()).x;
 
-        float rx = std::floor(right - (nameSize.x + space + multW + gainW) + (1.f - ta) * 12.f);
-        const float ry = std::floor(rowY + std::sin(rowBob[i]) * kRowBob);
+        const float rowW  = nameSize.x + space + multW + gainW;
+        const float slide = (1.f - ta) * 12.f;
+        float rx = std::floor(align == 0 ? anchor - slide : (align == 1 ? anchor - rowW * 0.5f : anchor - rowW) + slide);
+        const float ry = std::floor((fromBottom ? rowY - nameSize.y : rowY) + std::sin(rowBob[i]) * kRowBob);
 
         put(kRowNames[i], rx, ry, rowSize, tint(255, 255, 255, 255.f), tint(ar, ag, ab, 150.f));
         rx += nameSize.x + space;
@@ -343,6 +365,6 @@ void RenderPoints()
         }
         put(gain.c_str(), rx, ry, rowSize, tint(ar, ag, ab, 255.f), tint(0, 0, 0, 150.f));
 
-        rowY += nameSize.y + 1.f;
+        rowY += fromBottom ? -(nameSize.y + 1.f) : nameSize.y + 1.f;
     }
 }
