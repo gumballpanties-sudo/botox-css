@@ -14,8 +14,9 @@ enum IndStyle { IND_STYLE_DEFAULT = 0, IND_STYLE_STATIC, IND_STYLE_SMOOTH, IND_S
 inline constexpr const char* kIndStyleNames = "default\0static\0smooth\0mitosis\0kamidere\0squash & stretch\0kamibebra\0";
 
 // left / top appended: old cfg 1 = right, 2 = bottom kept
-enum IndSmoothOrigin { SMOOTH_ORIGIN_AUTO = 0, SMOOTH_ORIGIN_RIGHT, SMOOTH_ORIGIN_BOTTOM, SMOOTH_ORIGIN_LEFT, SMOOTH_ORIGIN_TOP };
-inline constexpr const char* kSmoothOriginNames = "auto\0right\0bottom\0left\0top\0";
+// center = default style spawn: in place, fade, smooth reflow
+enum IndSmoothOrigin { SMOOTH_ORIGIN_AUTO = 0, SMOOTH_ORIGIN_RIGHT, SMOOTH_ORIGIN_BOTTOM, SMOOTH_ORIGIN_LEFT, SMOOTH_ORIGIN_TOP, SMOOTH_ORIGIN_CENTER };
+inline constexpr const char* kSmoothOriginNames = "auto\0right\0bottom\0left\0top\0center\0";
 
 enum IndPreLayout { PRE_LAYOUT_RIGHT = 0, PRE_LAYOUT_ABOVE, PRE_LAYOUT_BELOW };
 inline constexpr const char* kPreLayoutNames = "right\0above\0below\0";

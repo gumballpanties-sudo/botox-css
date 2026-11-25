@@ -27,6 +27,8 @@ namespace n_lua_api
 	int traceback( lua_State* L );
 	/* render thread, every frame ( lua.cpp on_paint ): frees render.image pictures 10 s after their last draw */
 	void image_sweep( );
+	/* right after the paint callbacks: render.blur split the background list, every later overlay draws after the merge */
+	void blur_merge( );
 	/* game console (tier0 Msg) */
 	void console_msg( const std::string& text );
 

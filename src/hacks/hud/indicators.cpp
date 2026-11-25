@@ -1018,6 +1018,7 @@ static float s_smooth_clock = 0.f;
 constexpr float k_smooth_opacity_in = 22.f, k_smooth_opacity_out = 23.5f, k_smooth_position = 9.5f, k_smooth_appear_delay = 0.f;
 constexpr float k_smooth_spawn_base = 900.f, k_smooth_spawn_step = 25.f;
 constexpr float k_smooth_spawn_drop = 60.f;
+constexpr float k_smooth_center     = 13.f; // comes from center: slide + fade rate
 
 static float smooth_spawn_x(const size_t active)
 {
@@ -1087,10 +1088,11 @@ static float slide_run_x(const slide_dir_t& d, const float right_x, const float 
     return d.m_side == SMOOTH_ORIGIN_LEFT ? 2.f * tx - right_x : right_x;
 }
 
-static void smooth_tag_step(smooth_tag_t& t, const bool company, const float now, const float dt, const slide_dir_t& dir = {})
+static void smooth_tag_step(smooth_tag_t& t, const bool company, const float now, const float dt, const slide_dir_t& dir = {}, const bool center = false)
 {
-    float position_smooth = k_smooth_position;
-    if (t.m_removing && company) {
+    const float rate      = center ? k_smooth_center : k_smooth_position;
+    float position_smooth = rate;
+    if (t.m_removing && company && !center) {
         const float to_go          = (t.m_target_x - t.m_x) * dir.m_ux + (t.m_target_y - t.m_y) * dir.m_uy;
         const float total_distance = std::max(1.f, std::fabs(to_go) + 220.f);
         const float remaining      = std::clamp(to_go / total_distance, 0.f, 1.f);
@@ -1098,9 +1100,11 @@ static void smooth_tag_step(smooth_tag_t& t, const bool company, const float now
     }
 
     const float opacity_target = (!t.m_removing && now < t.m_appear_until) ? 0.f : t.m_target_opacity;
-    t.m_opacity = rido_lerp(t.m_opacity, opacity_target, t.m_removing ? k_smooth_opacity_out : k_smooth_opacity_in, dt);
-    t.m_x       = rido_lerp(t.m_x, t.m_target_x, dir.m_ux != 0.f ? position_smooth : k_smooth_position, dt);
-    t.m_y       = rido_lerp(t.m_y, t.m_target_y, dir.m_uy != 0.f ? position_smooth : k_smooth_position, dt);
+    // center: fade rides the slide out of / back into the middle
+    const float fade = center ? k_smooth_center : t.m_removing ? k_smooth_opacity_out : k_smooth_opacity_in;
+    t.m_opacity = rido_lerp(t.m_opacity, opacity_target, fade, dt);
+    t.m_x       = rido_lerp(t.m_x, t.m_target_x, dir.m_ux != 0.f ? position_smooth : rate, dt);
+    t.m_y       = rido_lerp(t.m_y, t.m_target_y, dir.m_uy != 0.f ? position_smooth : rate, dt);
 
     if (std::fabs(t.m_target_x - t.m_x) <= 0.75f)
         t.m_x = t.m_target_x;
@@ -1148,10 +1152,13 @@ static void keybinds_smooth(const std::vector<key_pending_t>& pending, ImFont* f
     const float drop = k_smooth_spawn_drop * (H > 0.f ? H / 1080.f : 1.f);
 
     const int fallback = horizontal ? SMOOTH_ORIGIN_RIGHT : SMOOTH_ORIGIN_BOTTOM;
+    const bool center = g_kiSmoothOrigin == SMOOTH_ORIGIN_CENTER;
 
     const auto start_removing = [&](smooth_tag_t& t) {
-        t.m_removing          = true;
-        t.m_target_opacity    = 0.f;
+        t.m_removing       = true;
+        t.m_target_opacity = 0.f;
+        if (center) // target = live middle, set after layout
+            return;
         const slide_dir_t dir = key_slide_dir(fallback, t.m_angle);
         const float primary   = !dir.m_axis_y ? (t.m_spawn_x != 0.f ? t.m_spawn_x : slide_spawn_x(dir, smooth_spawn_x(live_count()), t.m_size.x))
                                               : (t.m_spawn_y != 0.f ? t.m_spawn_y : t.m_y + (dir.m_side == SMOOTH_ORIGIN_TOP ? -drop : drop));
@@ -1215,6 +1222,7 @@ static void keybinds_smooth(const std::vector<key_pending_t>& pending, ImFont* f
     const float gap     = (float)g_kiSpacing;
     const float y0      = H - base;
     float       spawn_y = y0 + drop;
+    float       mid_y   = y0;
     if (horizontal) {
         const float spacing = fs * 0.2f + gap;
         float total = -spacing;
@@ -1240,11 +1248,28 @@ static void keybinds_smooth(const std::vector<key_pending_t>& pending, ImFont* f
             y += t.m_size.y + gap;
         }
         spawn_y = y + drop;
+        if (y > y0)
+            mid_y = (y0 + y - gap) * 0.5f;
     }
 
+    // center: each tag comes out of / goes back into the middle of the live row (stack) on its own
+    const auto middle = [&](const smooth_tag_t& t) { return ImVec2((W - t.m_size.x) * 0.5f, horizontal ? y0 : mid_y - t.m_size.y * 0.5f); };
+
     for (auto& t : s_smooth_tags) {
+        if (center && t.m_removing) {
+            const ImVec2 c = middle(t);
+            t.m_target_x   = c.x;
+            t.m_target_y   = c.y;
+        }
         if (!t.m_fresh)
             continue;
+        t.m_fresh = false;
+        if (center) {
+            const ImVec2 c = middle(t);
+            t.m_x          = c.x;
+            t.m_y          = c.y;
+            continue;
+        }
         const slide_dir_t dir = key_slide_dir(fallback, t.m_angle);
         float primary         = 0.f;
         if (!dir.m_axis_y)
@@ -1254,7 +1279,6 @@ static void keybinds_smooth(const std::vector<key_pending_t>& pending, ImFont* f
         const ImVec2 from = slide_from(dir, t.m_target_x, t.m_target_y, primary);
         t.m_x             = from.x;
         t.m_y             = from.y;
-        t.m_fresh         = false;
     }
 
     size_t visible = 0;
@@ -1265,7 +1289,7 @@ static void keybinds_smooth(const std::vector<key_pending_t>& pending, ImFont* f
     for (auto it = s_smooth_tags.begin(); it != s_smooth_tags.end();) {
         smooth_tag_t& t = *it;
 
-        smooth_tag_step(t, visible > 1, now, dt, key_slide_dir(fallback, t.m_angle));
+        smooth_tag_step(t, visible > 1, now, dt, key_slide_dir(fallback, t.m_angle), center);
         t.m_detect = rido_lerp(t.m_detect, t.m_target_detect, k_detect_smooth, dt);
 
         if (t.m_opacity > 0.01f) {
@@ -1352,6 +1376,7 @@ static void keybinds_kamibebra(const std::vector<key_pending_t>& pending, ImFont
         return count;
     };
 
+    float      mid_y  = y0;
     const auto recalc = [&]() {
         if (!horizontal) {
             float y = y0;
@@ -1362,6 +1387,7 @@ static void keybinds_kamibebra(const std::vector<key_pending_t>& pending, ImFont
                 t.m_target_y = y;
                 y += t.m_size.y + gap;
             }
+            mid_y = y > y0 ? (y0 + y - gap) * 0.5f : y0;
             return;
         }
 
@@ -1381,10 +1407,22 @@ static void keybinds_kamibebra(const std::vector<key_pending_t>& pending, ImFont
         }
     };
 
+    // center: each tag comes out of / goes back into the middle of the live row (stack) on its own
+    const bool center = g_kiSmoothOrigin == SMOOTH_ORIGIN_CENTER;
+    const auto middle = [&](const kamibebra_tag_t& t) {
+        return ImVec2(std::round((W - t.m_size.x) * 0.5f), horizontal ? y0 : std::round(mid_y - t.m_size.y * 0.5f));
+    };
+
     const auto start_removing = [&](kamibebra_tag_t& t) {
         t.m_removing       = true;
         t.m_target_opacity = 0.f;
         recalc();
+        if (center) {
+            const ImVec2 c = middle(t);
+            t.m_target_x   = c.x;
+            t.m_target_y   = c.y;
+            return;
+        }
         const slide_dir_t dir = key_slide_dir(SMOOTH_ORIGIN_RIGHT, t.m_angle);
         const float primary   = !dir.m_axis_y ? (t.m_spawn_x != 0.f ? t.m_spawn_x : slide_spawn_x(dir, smooth_spawn_x(live_count()), t.m_size.x))
                                               : t.m_target_y + drop;
@@ -1405,7 +1443,14 @@ static void keybinds_kamibebra(const std::vector<key_pending_t>& pending, ImFont
 
     // after recalc: target known
     const auto place_spawn = [&](kamibebra_tag_t& t) {
-        t.m_angle             = key_slide_roll();
+        t.m_angle = key_slide_roll();
+        if (center) {
+            const ImVec2 c   = middle(t);
+            t.m_x            = c.x;
+            t.m_y            = c.y;
+            t.m_appear_until = 0.f; // fade starts with the slide
+            return;
+        }
         const slide_dir_t dir = key_slide_dir(SMOOTH_ORIGIN_RIGHT, t.m_angle);
         const float primary   = !dir.m_axis_y ? (t.m_spawn_x = slide_spawn_x(dir, batch_spawn, t.m_size.x)) : t.m_target_y + drop;
         const ImVec2 from     = slide_from(dir, t.m_target_x, t.m_target_y, primary);
@@ -1473,8 +1518,8 @@ static void keybinds_kamibebra(const std::vector<key_pending_t>& pending, ImFont
     for (auto it = s_kamibebra_tags.begin(); it != s_kamibebra_tags.end();) {
         kamibebra_tag_t& t = *it;
 
-        float position_smooth = k_position;
-        if (t.m_removing && visible > 1) {
+        float position_smooth = center ? k_smooth_center : k_position;
+        if (t.m_removing && visible > 1 && !center) {
             const slide_dir_t dir = key_slide_dir(SMOOTH_ORIGIN_RIGHT, t.m_angle);
             const float to_go     = (t.m_target_x - t.m_x) * dir.m_ux + (t.m_target_y - t.m_y) * dir.m_uy;
             const float total     = std::max(std::round(s), std::fabs(to_go) + 220.f * s);
@@ -1483,7 +1528,7 @@ static void keybinds_kamibebra(const std::vector<key_pending_t>& pending, ImFont
         }
 
         const float opacity_target = (!t.m_removing && now < t.m_appear_until) ? 0.f : t.m_target_opacity;
-        t.m_opacity = rido_lerp(t.m_opacity, opacity_target, k_opacity * (t.m_removing ? k_remove_opacity : 1.f), dt);
+        t.m_opacity = rido_lerp(t.m_opacity, opacity_target, center ? k_smooth_center : k_opacity * (t.m_removing ? k_remove_opacity : 1.f), dt);
         t.m_x       = rido_lerp(t.m_x, t.m_target_x, position_smooth, dt);
         t.m_y       = rido_lerp(t.m_y, t.m_target_y, position_smooth, dt);
         if (std::fabs(t.m_target_x - t.m_x) <= std::round(0.75f * s))
@@ -2129,13 +2174,14 @@ static void speed_pair(speed_pair_state_t& st, const int style, const char* anim
             k.m_x    = target_x;
             k.m_init = true;
         }
-        k.m_x = rido_lerp(k.m_x, target_x, 8.5f, dt);
+        const bool center = opts.m_smooth_origin == SMOOTH_ORIGIN_CENTER;
+        k.m_x             = rido_lerp(k.m_x, target_x, center ? k_smooth_center : 8.5f, dt);
 
         const ImVec4 main_color = color;
         kamibebra_shadowed(font, fs, s, k.m_x + 0.2f * s, y, main_text, main_color, shadow, shadow_alpha);
 
         if (k.m_has_pre) {
-            k.m_pre_opacity = rido_lerp(k.m_pre_opacity, k.m_pre_removing ? 0.f : 1.f, 16.f * (k.m_pre_removing ? 1.6f : 1.f), dt);
+            k.m_pre_opacity = rido_lerp(k.m_pre_opacity, k.m_pre_removing ? 0.f : 1.f, center ? k_smooth_center : 16.f * (k.m_pre_removing ? 1.6f : 1.f), dt);
             if (stacked)
                 k.m_pre_x = k.m_pre_target_x = std::round((W - pre_size.x) * 0.5f);
             else if (!k.m_pre_removing)
@@ -2155,10 +2201,11 @@ static void speed_pair(speed_pair_state_t& st, const int style, const char* anim
                 pre_y = std::round(opts.m_pre_align == PRE_ALIGN_TOP ? y + mi.x - pi.x : y + mi.y - pi.y);
             }
 
-            // auto = fade in place; a side = slide in from there, back out the same way
+            // auto = fade in place; center = out from behind the number, back in; a side = slide in from there, back out the same way
+            const ImVec2 mid_off(std::round((W - pre_size.x) * 0.5f) - k.m_pre_x, stacked ? std::round(y + (main_size.y - pre_size.y) * 0.5f) - pre_y : 0.f);
             if (k.m_pre_fresh) {
                 k.m_pre_fresh = false;
-                k.m_pre_slide = ImVec2(0.f, 0.f);
+                k.m_pre_slide = center ? mid_off : ImVec2(0.f, 0.f);
                 if (opts.m_smooth_origin >= SMOOTH_ORIGIN_RIGHT && opts.m_smooth_origin <= SMOOTH_ORIGIN_TOP) {
                     const slide_dir_t dir =
                         slide_dir(opts.m_smooth_origin, SMOOTH_ORIGIN_RIGHT, opts.m_smooth_random ? slide_roll(opts.m_smooth_angle) : opts.m_smooth_angle);
@@ -2169,9 +2216,10 @@ static void speed_pair(speed_pair_state_t& st, const int style, const char* anim
                 }
                 k.m_pre_off = k.m_pre_slide;
             }
-            const ImVec2 off_to = k.m_pre_removing ? k.m_pre_slide : ImVec2(0.f, 0.f);
-            k.m_pre_off.x       = rido_lerp(k.m_pre_off.x, off_to.x, 9.5f, dt);
-            k.m_pre_off.y       = rido_lerp(k.m_pre_off.y, off_to.y, 9.5f, dt);
+            const ImVec2 off_to = k.m_pre_removing ? (center ? mid_off : k.m_pre_slide) : ImVec2(0.f, 0.f);
+            const float off_rate = center ? k_smooth_center : 9.5f;
+            k.m_pre_off.x        = rido_lerp(k.m_pre_off.x, off_to.x, off_rate, dt);
+            k.m_pre_off.y        = rido_lerp(k.m_pre_off.y, off_to.y, off_rate, dt);
 
             if (k.m_pre_opacity > 0.01f)
                 kamibebra_shadowed(pfont, pfs, pscl, k.m_pre_x + k.m_pre_off.x + 0.2f * s, pre_y + k.m_pre_off.y, k.m_pre, k.m_pre_color, shadow,
@@ -2227,6 +2275,9 @@ static void speed_pair(speed_pair_state_t& st, const int style, const char* anim
             s.m_has_main = true;
         }
 
+        // center: pre comes out from behind the number (screen middle), goes back in
+        const bool   center = opts.m_smooth_origin == SMOOTH_ORIGIN_CENTER;
+        const ImVec2 mid(pre_centre_x, stacked ? std::round(y + (main_size.y - pre_size.y) * 0.5f) : pre_y);
         const auto  pre_dir = [&]() { return slide_dir(opts.m_smooth_origin, SMOOTH_ORIGIN_RIGHT, opts.m_smooth_random ? p.m_angle : opts.m_smooth_angle); };
         slide_dir_t dir     = pre_dir();
         const float drop    = (dir.m_side == SMOOTH_ORIGIN_TOP ? -k_smooth_spawn_drop : k_smooth_spawn_drop) * (H > 0.f ? H / 1080.f : 1.f);
@@ -2238,13 +2289,16 @@ static void speed_pair(speed_pair_state_t& st, const int style, const char* anim
             p.m_angle          = opts.m_smooth_random ? slide_roll(opts.m_smooth_angle) : 0.f;
             dir                = pre_dir();
             // x relative to the number's right edge unless stacked
-            const float anchor  = stacked ? 0.f : m.m_x + main_size.x;
-            const float tx      = stacked ? pre_centre_x : anchor;
-            const float primary = !dir.m_axis_y ? (p.m_spawn_x = slide_run_x(dir, smooth_spawn_x(2), tx)) : (p.m_spawn_y = pre_y + drop);
-            const ImVec2 from   = slide_from(dir, tx, pre_y, primary);
-            p.m_x               = from.x - anchor;
-            p.m_y               = from.y;
-            s.m_has_pre         = true;
+            const float anchor = stacked ? 0.f : m.m_x + main_size.x;
+            const float tx     = stacked ? pre_centre_x : anchor;
+            ImVec2      from = mid;
+            if (!center) {
+                const float primary = !dir.m_axis_y ? (p.m_spawn_x = slide_run_x(dir, smooth_spawn_x(2), tx)) : (p.m_spawn_y = pre_y + drop);
+                from                = slide_from(dir, tx, pre_y, primary);
+            }
+            p.m_x       = from.x - anchor;
+            p.m_y       = from.y;
+            s.m_has_pre = true;
         }
 
         if (!show_pre && s.m_has_pre && !p.m_removing) {
@@ -2252,12 +2306,15 @@ static void speed_pair(speed_pair_state_t& st, const int style, const char* anim
             p.m_target_opacity = 0.f;
             if (!stacked)
                 p.m_x = std::round(m.m_x + 0.2f) + std::round(main_size.x + p.m_x) - 0.2f;
-            const float primary = !dir.m_axis_y ? (p.m_spawn_x != 0.f ? p.m_spawn_x : slide_run_x(dir, smooth_spawn_x(2), p.m_x))
-                                                : (p.m_spawn_y != 0.f ? p.m_spawn_y : p.m_y + drop);
-            const ImVec2 to     = slide_from(dir, p.m_x, pre_y, primary);
-            p.m_target_x        = to.x;
-            p.m_target_y        = to.y;
-            s.m_pre_across      = to.y - pre_y;
+            ImVec2 to = mid;
+            if (!center) {
+                const float primary = !dir.m_axis_y ? (p.m_spawn_x != 0.f ? p.m_spawn_x : slide_run_x(dir, smooth_spawn_x(2), p.m_x))
+                                                    : (p.m_spawn_y != 0.f ? p.m_spawn_y : p.m_y + drop);
+                to                  = slide_from(dir, p.m_x, pre_y, primary);
+            }
+            p.m_target_x   = to.x;
+            p.m_target_y   = to.y;
+            s.m_pre_across = to.y - pre_y;
         }
 
         if (s.m_has_pre && !p.m_removing) {
@@ -2267,9 +2324,9 @@ static void speed_pair(speed_pair_state_t& st, const int style, const char* anim
         } else if (p.m_removing && !dir.m_axis_y)
             p.m_target_y = pre_y + s.m_pre_across;
 
-        smooth_tag_step(m, false, now, dt);
+        smooth_tag_step(m, false, now, dt, {}, center);
         if (s.m_has_pre)
-            smooth_tag_step(p, p.m_opacity > 0.01f, now, dt, dir);
+            smooth_tag_step(p, p.m_opacity > 0.01f, now, dt, dir, center);
 
         const float main_x = std::round(m.m_x + 0.2f);
         push(false, ImVec2(main_x, std::round(m.m_y)), main_text, color, shadow_alpha);

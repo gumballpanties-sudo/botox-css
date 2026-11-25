@@ -24,7 +24,7 @@ void UnitB_Menu_movement_indicators()
             if (g_viStyle == IND_STYLE_SMOOTH || g_viStyle == IND_STYLE_KAMIBEBRA) {
                 ImGui::Combo("comes from##velocity indicator", &g_viSmoothOrigin, kSmoothOriginNames);
                 // kamibebra auto = fades in place, no direction
-                if (g_viStyle == IND_STYLE_SMOOTH || g_viSmoothOrigin != SMOOTH_ORIGIN_AUTO) {
+                if (g_viSmoothOrigin != SMOOTH_ORIGIN_CENTER && (g_viStyle == IND_STYLE_SMOOTH || g_viSmoothOrigin != SMOOTH_ORIGIN_AUTO)) {
                     // random = pre speed rolls its own angle in +-max each show
                     ImGui::Checkbox("random angle##velocity indicator", &g_viSmoothRandomAngle);
                     if (g_viSmoothRandomAngle)
@@ -94,7 +94,7 @@ void UnitB_Menu_movement_indicators()
 
             if (g_siStyle == IND_STYLE_SMOOTH || g_siStyle == IND_STYLE_KAMIBEBRA) {
                 ImGui::Combo("comes from##stamina indicator", &g_siSmoothOrigin, kSmoothOriginNames);
-                if (g_siStyle == IND_STYLE_SMOOTH || g_siSmoothOrigin != SMOOTH_ORIGIN_AUTO)
+                if (g_siSmoothOrigin != SMOOTH_ORIGIN_CENTER && (g_siStyle == IND_STYLE_SMOOTH || g_siSmoothOrigin != SMOOTH_ORIGIN_AUTO))
                     ImGui::SliderFloat("angle##stamina indicator", &g_siSmoothAngle, -90.f, 90.f, "%.0f deg", ImGuiSliderFlags_AlwaysClamp);
             }
 
@@ -187,12 +187,14 @@ void UnitB_Menu_movement_indicators()
 
             if (g_kiStyle == IND_STYLE_SMOOTH || g_kiStyle == IND_STYLE_KAMIBEBRA) {
                 ImGui::Combo("comes from##keybind indicators", &g_kiSmoothOrigin, kSmoothOriginNames);
-                // random = each tag rolls its own angle in +-max on turn on
-                ImGui::Checkbox("random angle##keybind indicators", &g_kiSmoothRandomAngle);
-                if (g_kiSmoothRandomAngle)
-                    ImGui::SliderFloat("max angle##keybind indicators", &g_kiSmoothAngle, 0.f, 90.f, "%.0f deg", ImGuiSliderFlags_AlwaysClamp);
-                else
-                    ImGui::SliderFloat("angle##keybind indicators", &g_kiSmoothAngle, -90.f, 90.f, "%.0f deg", ImGuiSliderFlags_AlwaysClamp);
+                if (g_kiSmoothOrigin != SMOOTH_ORIGIN_CENTER) {
+                    // random = each tag rolls its own angle in +-max on turn on
+                    ImGui::Checkbox("random angle##keybind indicators", &g_kiSmoothRandomAngle);
+                    if (g_kiSmoothRandomAngle)
+                        ImGui::SliderFloat("max angle##keybind indicators", &g_kiSmoothAngle, 0.f, 90.f, "%.0f deg", ImGuiSliderFlags_AlwaysClamp);
+                    else
+                        ImGui::SliderFloat("angle##keybind indicators", &g_kiSmoothAngle, -90.f, 90.f, "%.0f deg", ImGuiSliderFlags_AlwaysClamp);
+                }
             }
 
             if (g_kiStyle == IND_STYLE_STATIC)

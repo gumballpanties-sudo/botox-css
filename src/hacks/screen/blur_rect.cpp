@@ -2,18 +2,14 @@
 #include "blur_plan.h"
 #include "shaders/fx_bloom_blur.h"   // k_fxBloomBlurBytes -- same compiled shader bloom.cpp uses
 #include <algorithm>
-#include <cmath>
 
 // ==== per-frame job queue ========================================================
 // Fixed array, not a vector: AddCallback keeps the pointer until the draw list is replayed
 // later this same frame, and a vector could reallocate and move it out from under that.
-// sigma > 0 = BlurRectSmooth (lua render.blur): radius px, tint, rounding cut. 0 = strength 0..1, rounding unused.
-struct BlurJob { ImVec2 min, max; float strength; float rounding; float alpha = 1.f; float sigma = 0.f; ImU32 tint = IM_COL32_WHITE; };
-static constexpr int kMaxJobsPerFrame = 64;   // ponytail: fixed cap shared with lua render.blur, bump if a frame ever blurs more rects
-static constexpr int kMaxSmoothPerFrame = 48;   // lua's share: css paints lua before every panel, the panels keep 16
+struct BlurJob { ImVec2 min, max; float strength; float rounding; float alpha = 1.f; };
+static constexpr int kMaxJobsPerFrame = 64;   // ponytail: fixed cap, bump if a frame ever blurs more panels
 static BlurJob s_jobs[kMaxJobsPerFrame];
 static int     s_jobCount = 0;
-static int     s_smoothCount = 0;
 
 // ==== scratch render targets (device resources, sized to the biggest rect this cache has seen) ====
 static IDirect3DPixelShader9* s_ps    = nullptr;
@@ -24,19 +20,60 @@ static IDirect3DSurface9*     s_surfB = nullptr;
 static int s_bufW = 0, s_bufH = 0;
 static bool s_failed = false;
 
-void BlurRect_Destroy()
+// lua render.blur: [0] 1/2 res, [1] + [2] 1/4 res; the frame's one blur ends in [1]
+static IDirect3DTexture9* s_luaTex[3]   = {};
+static IDirect3DSurface9* s_luaSurf[3]  = {};
+static IDirect3DSurface9* s_luaResolve  = nullptr;   // msaa back buffer: plain copy first, msaa can't be stretched
+static D3DSURFACE_DESC    s_luaDesc{};
+static float              s_luaStrength = 0.f;
+
+static void BlurScratchRelease()
 {
     if (s_surfB) { s_surfB->Release(); s_surfB = nullptr; }
     if (s_texB)  { s_texB->Release();  s_texB  = nullptr; }
     if (s_surfA) { s_surfA->Release(); s_surfA = nullptr; }
     if (s_texA)  { s_texA->Release();  s_texA  = nullptr; }
-    if (s_ps)    { s_ps->Release();    s_ps    = nullptr; }
     s_bufW = s_bufH = 0;
+}
+
+static void BlurLuaRelease()
+{
+    for (int i = 0; i < 3; ++i)
+    {
+        if (s_luaSurf[i]) { s_luaSurf[i]->Release(); s_luaSurf[i] = nullptr; }
+        if (s_luaTex[i])  { s_luaTex[i]->Release();  s_luaTex[i]  = nullptr; }
+    }
+    if (s_luaResolve) { s_luaResolve->Release(); s_luaResolve = nullptr; }
+    s_luaDesc = {};
+}
+
+void BlurRect_Destroy()
+{
+    BlurScratchRelease();
+    BlurLuaRelease();
+    if (s_ps) { s_ps->Release(); s_ps = nullptr; }
+}
+
+static bool BlurShader(IDirect3DDevice9* dev)
+{
+    if (s_ps) return true;
+    if (s_failed) return false;
+
+    std::vector<DWORD> code((sizeof(k_fxBloomBlurBytes) + 3) / 4);
+    memcpy(code.data(), k_fxBloomBlurBytes, sizeof(k_fxBloomBlurBytes));
+    if (FAILED(dev->CreatePixelShader(code.data(), &s_ps)) || !s_ps)
+    {
+        s_ps = nullptr;
+        s_failed = true;
+        DebugLog("blur_rect: the card refused the blur shader -- panel blur is off");
+        return false;
+    }
+    return true;
 }
 
 static bool BlurEnsure(IDirect3DDevice9* dev, int w, int h)
 {
-    if (s_failed) return false;
+    if (!BlurShader(dev)) return false;
     // Grow-only. Was "== w && == h": two panels of different size in one frame (watermark +
     // spectator list), or a watermark whose fps/time text changed width, recreated both
     // targets AND the shader every time -- a CreateTexture stall per frame. The rect is
@@ -44,20 +81,11 @@ static bool BlurEnsure(IDirect3DDevice9* dev, int w, int h)
     // clamp edges and the per-pass UV step (1/rect px) are unchanged.
     // ponytail: grows to the biggest rect seen (boot screen = 1024^2) and stays there; bucket
     // per size if the fill cost of a small panel on a 1024^2 buffer ever shows up.
-    if (s_ps && s_texA && s_texB && w <= s_bufW && h <= s_bufH) return true;
+    if (s_texA && s_texB && w <= s_bufW && h <= s_bufH) return true;
     w = (std::max)(w, s_bufW);
     h = (std::max)(h, s_bufH);
 
-    BlurRect_Destroy();
-
-    std::vector<DWORD> code((sizeof(k_fxBloomBlurBytes) + 3) / 4);
-    memcpy(code.data(), k_fxBloomBlurBytes, sizeof(k_fxBloomBlurBytes));
-    if (FAILED(dev->CreatePixelShader(code.data(), &s_ps)) || !s_ps)
-    {
-        s_failed = true;
-        DebugLog("blur_rect: the card refused the blur shader -- panel blur is off");
-        return false;
-    }
+    BlurScratchRelease();
 
     if (FAILED(dev->CreateTexture(w, h, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &s_texA, nullptr)) ||
         FAILED(s_texA->GetSurfaceLevel(0, &s_surfA)) ||
@@ -65,11 +93,49 @@ static bool BlurEnsure(IDirect3DDevice9* dev, int w, int h)
         FAILED(s_texB->GetSurfaceLevel(0, &s_surfB)))
     {
         DebugLog("blur_rect: scratch target %dx%d failed", w, h);
-        BlurRect_Destroy();
+        BlurScratchRelease();
         return false;
     }
 
     s_bufW = w; s_bufH = h;
+    return true;
+}
+
+// record time, render thread: sized from the back buffer, the texture ImGui draws the rects with must exist now
+static bool BlurLuaEnsure(IDirect3DDevice9* dev)
+{
+    if (!BlurShader(dev)) return false;
+
+    IDirect3DSurface9* bb = nullptr;
+    if (FAILED(dev->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &bb)) || !bb) return false;
+    D3DSURFACE_DESC d{};
+    const bool described = SUCCEEDED(bb->GetDesc(&d));
+    bb->Release();
+    if (!described || d.Width < 8 || d.Height < 8) return false;
+
+    if (s_luaTex[1] && d.Width == s_luaDesc.Width && d.Height == s_luaDesc.Height && d.Format == s_luaDesc.Format &&
+        d.MultiSampleType == s_luaDesc.MultiSampleType)
+        return true;
+
+    BlurLuaRelease();
+    for (int i = 0; i < 3; ++i)
+    {
+        const UINT div = i ? 4 : 2;
+        if (FAILED(dev->CreateTexture(d.Width / div, d.Height / div, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &s_luaTex[i], nullptr)) ||
+            FAILED(s_luaTex[i]->GetSurfaceLevel(0, &s_luaSurf[i])))
+        {
+            BlurLuaRelease();
+            return false;
+        }
+    }
+    if (d.MultiSampleType != D3DMULTISAMPLE_NONE &&
+        FAILED(dev->CreateRenderTarget(d.Width, d.Height, d.Format, D3DMULTISAMPLE_NONE, 0, FALSE, &s_luaResolve, nullptr)))
+    {
+        BlurLuaRelease();
+        return false;
+    }
+
+    s_luaDesc = d;
     return true;
 }
 
@@ -154,87 +220,9 @@ static void BlurRestore(IDirect3DDevice9* dev, BlurSaved& s)
     if (s.indices) s.indices->Release();
 }
 
-struct BlurVert { float x, y, z, rhw, u, v; };
-
-// Local space (0..w, 0..h) -- used for the ping-pong passes between the scratch targets (whole buffer).
-static void BlurQuadLocal(BlurVert (&q)[4], float w, float h)
+// the blur passes' state; BlurRestore puts every one of these back
+static void BlurPassState(IDirect3DDevice9* dev)
 {
-    q[0] = { -0.5f,    -0.5f,     0.f, 1.f, 0.f, 0.f };
-    q[1] = { w - 0.5f, -0.5f,     0.f, 1.f, 1.f, 0.f };
-    q[2] = { -0.5f,     h - 0.5f, 0.f, 1.f, 0.f, 1.f };
-    q[3] = { w - 0.5f,  h - 0.5f, 0.f, 1.f, 1.f, 1.f };
-}
-
-// Absolute screen space -- used for the final pass, which draws straight onto the saved
-// render target at the panel's own position. uv = the panel's cut of the blurred scratch.
-static void BlurQuadAbs(BlurVert (&q)[4], float x0, float y0, float x1, float y1, float u0 = 0.f, float v0 = 0.f, float u1 = 1.f, float v1 = 1.f)
-{
-    q[0] = { x0 - 0.5f, y0 - 0.5f, 0.f, 1.f, u0, v0 };
-    q[1] = { x1 - 0.5f, y0 - 0.5f, 0.f, 1.f, u1, v0 };
-    q[2] = { x0 - 0.5f, y1 - 0.5f, 0.f, 1.f, u0, v1 };
-    q[3] = { x1 - 0.5f, y1 - 0.5f, 0.f, 1.f, u1, v1 };
-}
-
-// BlurRectSmooth rounding: a fan over the rounded rect a..b, uv = where each point sits in the blurred cut
-// (top left o, rw x rh px). Hard edge: the caller's own rounded panel draws over it.
-static constexpr int kFanSteps = 8;                          // per corner
-static constexpr int kFanVerts = 2 + 4 * (kFanSteps + 1);    // centre + 4 arcs + the first arc point again
-
-static int BlurFanRounded(BlurVert (&v)[kFanVerts], ImVec2 a, ImVec2 b, float r, ImVec2 o, float rw, float rh)
-{
-    r = (std::min)(r, (std::min)(b.x - a.x, b.y - a.y) * 0.5f);
-    const auto at = [&](float x, float y) { return BlurVert{ x - 0.5f, y - 0.5f, 0.f, 1.f, (x - o.x) / rw, (y - o.y) / rh }; };
-    const ImVec2 centre[4] = { { a.x + r, a.y + r }, { b.x - r, a.y + r }, { b.x - r, b.y - r }, { a.x + r, b.y - r } };
-
-    int n = 0;
-    v[n++] = at((a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f);
-    for (int c = 0; c < 4; ++c)   // top left 180..270 deg, then clockwise (y down)
-        for (int s = 0; s <= kFanSteps; ++s)
-        {
-            const float t = 3.14159265f * (1.f + 0.5f * (c + (float)s / kFanSteps));
-            v[n++] = at(centre[c].x + std::cos(t) * r, centre[c].y + std::sin(t) * r);
-        }
-    v[n++] = v[1];
-    return n;
-}
-
-static void BlurRectDraw(IDirect3DDevice9* dev, const BlurJob& j)
-{
-    IDirect3DSurface9* rtSaved = nullptr;
-    if (FAILED(dev->GetRenderTarget(0, &rtSaved)) || !rtSaved) return;
-
-    // StretchRect refuses a source rect past the target: the on-screen part only (a lua panel half off screen).
-    // Smooth jobs also read 3 radii around the rect, so its edge blurs in what is next to it (botox csgo blurs the
-    // whole frame), not its own edge rows smeared by the clamp.
-    const float pad = j.sigma > 0.f ? 3.f * j.sigma : 0.f;
-    ImVec2 mn = j.min, mx = j.max;                                           // the rect
-    ImVec2 cmn(mn.x - pad, mn.y - pad), cmx(mx.x + pad, mx.y + pad);         // what is read + blurred
-    D3DSURFACE_DESC desc{};
-    if (SUCCEEDED(rtSaved->GetDesc(&desc)))
-    {
-        const auto onScreen = [&](ImVec2& a, ImVec2& b) {
-            a = ImVec2((std::max)(a.x, 0.f), (std::max)(a.y, 0.f));
-            b = ImVec2((std::min)(b.x, (float)desc.Width), (std::min)(b.y, (float)desc.Height));
-        };
-        onScreen(mn, mx);
-        onScreen(cmn, cmx);
-    }
-
-    const int rw = (int)(cmx.x - cmn.x), rh = (int)(cmx.y - cmn.y);
-    // Scratch caps at 1024: a bigger rect (boot screen = whole screen) is downsampled into it
-    // and stretched back, like botox's small-texture fullscreen blur. Was cropped to 1024 px,
-    // which left the right side of a 1920 screen unblurred.
-    const int sw = (std::min)(rw, 1024), sh = (std::min)(rh, 1024);
-
-    if (!(mx.x - mn.x >= 2.f) || !(mx.y - mn.y >= 2.f) || rw < 2 || rh < 2 || !BlurEnsure(dev, sw, sh)) { rtSaved->Release(); return; }
-
-    const RECT src{ (LONG)cmn.x, (LONG)cmn.y, (LONG)cmn.x + rw, (LONG)cmn.y + rh };
-    const ImVec2 o((float)src.left, (float)src.top);   // scratch uv 0..1 = src
-    if (FAILED(dev->StretchRect(rtSaved, &src, s_surfA, nullptr, D3DTEXF_LINEAR))) { rtSaved->Release(); return; }
-
-    BlurSaved st{};
-    BlurSave(dev, st);
-
     for (int i = 0; i < 14; ++i) dev->SetRenderState(k_brRS[i], k_brRSVal[i]);
     dev->SetDepthStencilSurface(nullptr);
     dev->SetVertexShader(nullptr);
@@ -247,42 +235,65 @@ static void BlurRectDraw(IDirect3DDevice9* dev, const BlurJob& j)
     dev->SetSamplerState(0, D3DSAMP_MIPFILTER,   D3DTEXF_NONE);
     dev->SetSamplerState(0, D3DSAMP_SRGBTEXTURE, 0);
     dev->SetPixelShader(s_ps);
+}
 
-    int   passes = 1;
-    float fx = 1.f, fy = 1.f;   // tap spacing per pass step
-    if (j.sigma > 0.f)
-    {   // px radius -> scratch texels (a rect past 1024 px was shrunk into it)
-        const BlurPlan plan = BlurPlanFor(j.sigma * sw / rw, j.sigma * sh / rh);
-        passes = plan.passes; fx = plan.fx; fy = plan.fy;
-    }
-    else
+struct BlurVert { float x, y, z, rhw, u, v; };
+
+// Local space (0..w, 0..h) -- used for the ping-pong passes between the scratch targets (whole buffer).
+static void BlurQuadLocal(BlurVert (&q)[4], float w, float h)
+{
+    q[0] = { -0.5f,    -0.5f,     0.f, 1.f, 0.f, 0.f };
+    q[1] = { w - 0.5f, -0.5f,     0.f, 1.f, 1.f, 0.f };
+    q[2] = { -0.5f,     h - 0.5f, 0.f, 1.f, 0.f, 1.f };
+    q[3] = { w - 0.5f,  h - 0.5f, 0.f, 1.f, 1.f, 1.f };
+}
+
+// Absolute screen space -- used for the final pass, which draws straight onto the saved
+// render target at the panel's own position.
+static void BlurQuadAbs(BlurVert (&q)[4], float x0, float y0, float x1, float y1)
+{
+    q[0] = { x0 - 0.5f, y0 - 0.5f, 0.f, 1.f, 0.f, 0.f };
+    q[1] = { x1 - 0.5f, y0 - 0.5f, 0.f, 1.f, 1.f, 0.f };
+    q[2] = { x0 - 0.5f, y1 - 0.5f, 0.f, 1.f, 0.f, 1.f };
+    q[3] = { x1 - 0.5f, y1 - 0.5f, 0.f, 1.f, 1.f, 1.f };
+}
+
+static void BlurRectDraw(IDirect3DDevice9* dev, const BlurJob& j)
+{
+    IDirect3DSurface9* rtSaved = nullptr;
+    if (FAILED(dev->GetRenderTarget(0, &rtSaved)) || !rtSaved) return;
+
+    // StretchRect refuses a source rect past the target: the on-screen part only
+    ImVec2 mn = j.min, mx = j.max;
+    D3DSURFACE_DESC desc{};
+    if (SUCCEEDED(rtSaved->GetDesc(&desc)))
     {
-        const float str = j.strength < 0.f ? 0.f : (j.strength > 1.f ? 1.f : j.strength);
-        passes = 1 + (int)(str * 5.f + 0.5f);   // 1..6, same radius->pass map bloom uses
+        mn = ImVec2((std::max)(mn.x, 0.f), (std::max)(mn.y, 0.f));
+        mx = ImVec2((std::min)(mx.x, (float)desc.Width), (std::min)(mx.y, (float)desc.Height));
     }
+
+    const int rw = (int)(mx.x - mn.x), rh = (int)(mx.y - mn.y);
+    // Scratch caps at 1024: a bigger rect (boot screen = whole screen) is downsampled into it
+    // and stretched back, like botox's small-texture fullscreen blur. Was cropped to 1024 px,
+    // which left the right side of a 1920 screen unblurred.
+    const int sw = (std::min)(rw, 1024), sh = (std::min)(rh, 1024);
+
+    if (rw < 2 || rh < 2 || !BlurEnsure(dev, sw, sh)) { rtSaved->Release(); return; }
+
+    const RECT src{ (LONG)mn.x, (LONG)mn.y, (LONG)mn.x + rw, (LONG)mn.y + rh };
+    if (FAILED(dev->StretchRect(rtSaved, &src, s_surfA, nullptr, D3DTEXF_LINEAR))) { rtSaved->Release(); return; }
+
+    BlurSaved st{};
+    BlurSave(dev, st);
+    BlurPassState(dev);
+
+    const float str    = j.strength < 0.f ? 0.f : (j.strength > 1.f ? 1.f : j.strength);
+    const int   passes = 1 + (int)(str * 5.f + 0.5f);   // 1..6, same radius->pass map bloom uses
     const float neutral[4] = { 1.f, 1.f, 1.f, 1.f };
-    // c1 rgb on the last pass = tint (shader multiplies), its alpha joins the crossfade below
-    const float tint[4] = { ((j.tint >> IM_COL32_R_SHIFT) & 0xFF) / 255.f, ((j.tint >> IM_COL32_G_SHIFT) & 0xFF) / 255.f,
-                            ((j.tint >> IM_COL32_B_SHIFT) & 0xFF) / 255.f, 1.f };
-    const float alpha = j.alpha * ((j.tint >> IM_COL32_A_SHIFT) & 0xFF) / 255.f;
     const D3DVIEWPORT9 vpRect{ 0, 0, (DWORD)s_bufW, (DWORD)s_bufH, 0.f, 1.f };
 
     BlurVert qLocal[4]; BlurQuadLocal(qLocal, (float)s_bufW, (float)s_bufH);
-    BlurVert qAbs[4];
-    if (pad > 0.f)
-        BlurQuadAbs(qAbs, mn.x, mn.y, mx.x, mx.y, (mn.x - o.x) / rw, (mn.y - o.y) / rh, (mx.x - o.x) / rw, (mx.y - o.y) / rh);
-    else
-        BlurQuadAbs(qAbs, mn.x, mn.y, mn.x + rw, mn.y + rh);   // legacy: rect = what was read, as before
-    // fan: the off-screen side ends a radius out (corners stay hidden), not at the lua rect's far edge: a vertex at -1e9
-    // loses the float precision the gpu clip needs
-    const float r = j.rounding;
-    const ImVec2 fanMin((std::max)(j.min.x, mn.x - r), (std::max)(j.min.y, mn.y - r)), fanMax((std::min)(j.max.x, mx.x + r), (std::min)(j.max.y, mx.y + r));
-    BlurVert fan[kFanVerts];
-    const int fanCount = j.sigma > 0.f && r >= 0.5f ? BlurFanRounded(fan, fanMin, fanMax, r, o, (float)rw, (float)rh) : 0;
-    const auto drawFinal = [&] {
-        if (fanCount) dev->DrawPrimitiveUP(D3DPT_TRIANGLEFAN, fanCount - 2, fan, sizeof(BlurVert));
-        else          dev->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, qAbs, sizeof(BlurVert));
-    };
+    BlurVert qAbs[4];   BlurQuadAbs(qAbs, mn.x, mn.y, mn.x + rw, mn.y + rh);
 
     for (int i = 0; i < passes; ++i)
     {
@@ -290,7 +301,7 @@ static void BlurRectDraw(IDirect3DDevice9* dev, const BlurJob& j)
         const bool  last = (i == passes - 1);
 
         // x: A -> B
-        const float cx[4] = { step * fx / (float)sw, 0.f, 0.f, 0.f };
+        const float cx[4] = { step / (float)sw, 0.f, 0.f, 0.f };
         dev->SetPixelShaderConstantF(0, cx, 1);
         dev->SetPixelShaderConstantF(1, neutral, 1);
         dev->SetRenderTarget(0, s_surfB);
@@ -299,10 +310,9 @@ static void BlurRectDraw(IDirect3DDevice9* dev, const BlurJob& j)
         dev->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, qLocal, sizeof(BlurVert));
 
         // y: B -> A, or on the last pass B -> the panel's own position on the saved target
-        const float cy[4] = { 0.f, step * fy / (float)sh, 0.f, 0.f };
+        const float cy[4] = { 0.f, step / (float)sh, 0.f, 0.f };
         dev->SetPixelShaderConstantF(0, cy, 1);
         dev->SetTexture(0, s_texB);
-        dev->SetPixelShaderConstantF(1, last ? tint : neutral, 1);
 
         if (!last)
         {
@@ -314,10 +324,10 @@ static void BlurRectDraw(IDirect3DDevice9* dev, const BlurJob& j)
         {
             dev->SetRenderTarget(0, rtSaved);
             dev->SetViewport(&st.vp);
-            if (alpha >= 0.999f)
+            if (j.alpha >= 0.999f)
             {
                 dev->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);   // straight replace, not bloom's additive
-                drawFinal();
+                dev->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, qAbs, sizeof(BlurVert));
             }
             else
             {
@@ -327,13 +337,13 @@ static void BlurRectDraw(IDirect3DDevice9* dev, const BlurJob& j)
                 dev->GetRenderState(D3DRS_DESTBLEND, &dst);
                 dev->GetRenderState(D3DRS_BLENDOP, &op);
                 dev->GetRenderState(D3DRS_BLENDFACTOR, &factor);
-                const DWORD a = (DWORD)((alpha < 0.f ? 0.f : alpha) * 255.f + 0.5f);
+                const DWORD a = (DWORD)((j.alpha < 0.f ? 0.f : j.alpha) * 255.f + 0.5f);
                 dev->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
                 dev->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_BLENDFACTOR);
                 dev->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVBLENDFACTOR);
                 dev->SetRenderState(D3DRS_BLENDOP, D3DBLENDOP_ADD);
                 dev->SetRenderState(D3DRS_BLENDFACTOR, D3DCOLOR_ARGB(a, a, a, a));
-                drawFinal();
+                dev->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, qAbs, sizeof(BlurVert));
                 dev->SetRenderState(D3DRS_DESTBLEND, dst);
                 dev->SetRenderState(D3DRS_BLENDOP, op);
                 dev->SetRenderState(D3DRS_BLENDFACTOR, factor);
@@ -349,6 +359,48 @@ static void BlurRectCallback(const ImDrawList*, const ImDrawCmd* cmd)
 {
     const BlurJob* j = static_cast<const BlurJob*>(cmd->UserCallbackData);
     if (j && g_d3dDev) BlurRectDraw(g_d3dDev, *j);
+}
+
+// replay: the frame drawn so far -> 1/4 res ( two 2x linear stretches = exact 4x4 average ) -> x + y passes into [1]
+static void BlurLuaCallback(const ImDrawList*, const ImDrawCmd*)
+{
+    IDirect3DDevice9* dev = g_d3dDev;
+    if (!dev || !s_ps || !s_luaTex[1]) return;
+
+    BlurSaved st{};
+    BlurSave(dev, st);
+
+    IDirect3DSurface9* src = st.rt;
+    if (src && s_luaResolve)
+        src = SUCCEEDED(dev->StretchRect(src, nullptr, s_luaResolve, nullptr, D3DTEXF_NONE)) ? s_luaResolve : nullptr;
+
+    if (src && SUCCEEDED(dev->StretchRect(src, nullptr, s_luaSurf[0], nullptr, D3DTEXF_LINEAR)) &&
+        SUCCEEDED(dev->StretchRect(s_luaSurf[0], nullptr, s_luaSurf[1], nullptr, D3DTEXF_LINEAR)))
+    {
+        BlurPassState(dev);
+
+        const float w = (float)(s_luaDesc.Width / 4), h = (float)(s_luaDesc.Height / 4);
+        const float neutral[4] = { 1.f, 1.f, 1.f, 1.f };
+        const BlurPlan plan = BlurPlanFor(s_luaStrength);
+        const float cx[4] = { plan.spread / w, 0.f, 0.f, 0.f }, cy[4] = { 0.f, plan.spread / h, 0.f, 0.f };
+        BlurVert q[4]; BlurQuadLocal(q, w, h);
+
+        dev->SetPixelShaderConstantF(1, neutral, 1);
+        for (int i = 0; i < plan.passes; ++i)
+        {
+            dev->SetPixelShaderConstantF(0, cx, 1);
+            dev->SetRenderTarget(0, s_luaSurf[2]);   // also sets the viewport to the whole target
+            dev->SetTexture(0, s_luaTex[1]);
+            dev->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, q, sizeof(BlurVert));
+
+            dev->SetPixelShaderConstantF(0, cy, 1);
+            dev->SetRenderTarget(0, s_luaSurf[1]);
+            dev->SetTexture(0, s_luaTex[2]);
+            dev->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, q, sizeof(BlurVert));
+        }
+    }
+
+    BlurRestore(dev, st);
 }
 
 // whole job assigned: a slot is reused every frame, a field left out keeps the last frame's job's value
@@ -368,15 +420,15 @@ void BlurRect(ImDrawList* dl, ImVec2 min, ImVec2 max, float strength, float roun
     dl->AddCallback(&BlurRectCallback, &j);
 }
 
-void BlurRectSmooth(ImDrawList* dl, ImVec2 min, ImVec2 max, float amount, ImU32 tint, float rounding)
+ImTextureID BlurLua_Queue(ImDrawList* dl, float strength)
 {
-    if (!dl || !(amount > 0.f) || !(tint & IM_COL32_A_MASK) || s_jobCount >= kMaxJobsPerFrame || s_smoothCount >= kMaxSmoothPerFrame)
-        return;   // nan amount too
-    ++s_smoothCount;
-    BlurJob& j = s_jobs[s_jobCount++];
-    j = BlurJob{ min, max, 0.f, rounding, 1.f, amount * k_blurStrengthPx, tint };
-    dl->AddCallback(&BlurRectCallback, &j);
+    if (!dl || !g_d3dDev || !(strength > 0.f) || !BlurLuaEnsure(g_d3dDev)) return nullptr;   // nan too
+    s_luaStrength = strength;
+    dl->AddCallback(&BlurLuaCallback, nullptr);
+    return (ImTextureID)s_luaTex[1];
 }
+
+void BlurLua_Strength(float strength) { s_luaStrength = (std::max)(s_luaStrength, strength); }
 
 void BlurRect_ScaleJob(const ImDrawCmd& cmd, ImVec2 pivot, float scale)
 {
@@ -384,8 +436,7 @@ void BlurRect_ScaleJob(const ImDrawCmd& cmd, ImVec2 pivot, float scale)
     BlurJob& j = *static_cast<BlurJob*>(cmd.UserCallbackData);   // s_jobs: ours, mutable
     j.min = ImVec2(pivot.x + (j.min.x - pivot.x) * scale, pivot.y + (j.min.y - pivot.y) * scale);
     j.max = ImVec2(pivot.x + (j.max.x - pivot.x) * scale, pivot.y + (j.max.y - pivot.y) * scale);
-    j.sigma *= scale;
     j.rounding *= scale;
 }
 
-void BlurRect_NewFrame() { s_jobCount = s_smoothCount = 0; }
+void BlurRect_NewFrame() { s_jobCount = 0; }

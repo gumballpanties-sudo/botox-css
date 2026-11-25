@@ -537,6 +537,7 @@ void n_lua::impl_t::on_paint()
 	n_lua_api::s_in_paint = true;
 	dispatch("paint", no_args);
 	n_lua_api::s_in_paint = false;
+	n_lua_api::blur_merge();
 }
 
 void n_lua::impl_t::on_create_move(UserCmd_t* cmd, bool* send_packet, const bool pre_prediction)

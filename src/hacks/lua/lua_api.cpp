@@ -61,7 +61,7 @@
 #include "../misc/killeffects.h"    // KillEffects_DispatchParticle/_Sparks -- fx.particle/fx.sparks
 #include "../visuals/esp_preview.h" // EspPreview::AnimRoot* -- model:animate / entity:animate roots
 #include "../hud/gif_tex.h"          // GifTex_Get / _Frame -- render.image
-#include "../screen/blur_rect.h"     // BlurRectSmooth -- render.blur
+#include "../screen/blur_rect.h"     // BlurLua_Queue -- render.blur
 
 #include "lua_api.h"
 #include "lua_image.h"
@@ -734,14 +734,43 @@ namespace
 		return 0;
 	}
 
-	// blurs what is drawn under the rect so far (game, vgui hud, earlier draws of this and older scripts: lua paints
-	// before every other overlay here). strength 1 = 34 px radius, 0..3; color tints + fades it, alpha 0 = skipped
+	// gamesense: the paint's first call queues one blur of what is drawn so far (game, vgui hud, earlier lua draws: lua
+	// paints before every other overlay here), every rect of the paint goes on channel 0 right after it = under all lua
+	// draws after it. strength 0..3, biggest of the paint wins; color tints + fades it, alpha 0 = skipped
+	ImDrawListSplitter s_blur_split;
+	ImTextureID s_blur_texture = nullptr;
+	bool s_blur_tried          = false;
+
 	int l_render_blur(lua_State* L)
 	{
 		require_paint(L);
 		const float x1 = check_float(L, 1), y1 = check_float(L, 2), x2 = check_float(L, 3), y2 = check_float(L, 4);
-		BlurRectSmooth(ImGui::GetBackgroundDrawList(), ImVec2(std::min(x1, x2), std::min(y1, y2)), ImVec2(std::max(x1, x2), std::max(y1, y2)),
-		               std::clamp(opt_float(L, 5, 1.f), 0.f, 3.f), opt_color(L, 6), std::max(0.f, opt_float(L, 7, 0.f)));   // 0 first: nan -> 0
+		const float strength = std::clamp(opt_float(L, 5, 1.f), 0.f, 3.f);
+		const ImU32 color    = opt_color(L, 6);
+		const float rounding = std::max(0.f, opt_float(L, 7, 0.f));   // 0 first: nan -> 0
+		if (!(strength > 0.f) || !(color & IM_COL32_A_MASK))
+			return 0;
+
+		ImDrawList* dl = ImGui::GetBackgroundDrawList();
+		if (!s_blur_tried) {
+			s_blur_tried = true;
+			if ((s_blur_texture = BlurLua_Queue(dl, strength)))
+				s_blur_split.Split(dl, 2);   // n_lua_api::blur_merge after the paint
+		}
+		if (!s_blur_texture)
+			return 0;
+
+		/* far off-screen part dropped ( corners kept a radius out ): a vertex far out loses float precision on the gpu clip */
+		const ImVec2 screen = ImGui::GetIO().DisplaySize;
+		const auto at = [&](float x, float y) {
+			return ImVec2(std::clamp(x, -rounding, screen.x + rounding), std::clamp(y, -rounding, screen.y + rounding));
+		};
+		const ImVec2 lo = at(std::min(x1, x2), std::min(y1, y2)), hi = at(std::max(x1, x2), std::max(y1, y2));
+
+		BlurLua_Strength(strength);
+		s_blur_split.SetCurrentChannel(dl, 0);
+		dl->AddImageRounded(s_blur_texture, lo, hi, ImVec2(lo.x / screen.x, lo.y / screen.y), ImVec2(hi.x / screen.x, hi.y / screen.y), color, rounding);
+		s_blur_split.SetCurrentChannel(dl, 1);
 		return 0;
 	}
 
@@ -2352,6 +2381,14 @@ void n_lua_api::image_sweep()
 		if (it->second.m_gif) GifTex_Erase(("lua:" + it->first).c_str());
 		it = s_images.erase(it);
 	}
+}
+
+void n_lua_api::blur_merge()
+{
+	if (s_blur_texture)
+		s_blur_split.Merge(ImGui::GetBackgroundDrawList());
+	s_blur_texture = nullptr;
+	s_blur_tried   = false;
 }
 
 void n_lua_api::push_cmd(lua_State* L) { lua_newuserdatauv(L, 1, 0); luaL_setmetatable(L, k_cmd_meta); }
