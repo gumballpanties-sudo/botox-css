@@ -112,6 +112,7 @@ static uint64_t SteamOf(const SpecPlayerInfo_t& pi)
 // player (local included when dead -- the donor never skips it either). No dormancy check: this TU
 // has no confirmed IClientNetworkable::IsDormant call path (aim TU's SDK can't be included here).
 static std::vector<SpecEntry> s_raw;
+static std::vector<SpecEntry> s_rawDeadTarget;   // same scan, target dead (requiem / primordial never check it is alive)
 static int s_rawFrame = -1;
 
 static const std::vector<SpecEntry>& RawEntries()
@@ -119,6 +120,7 @@ static const std::vector<SpecEntry>& RawEntries()
     if (s_rawFrame == ImGui::GetFrameCount()) return s_raw;
     s_rawFrame = ImGui::GetFrameCount();
     s_raw.clear();
+    s_rawDeadTarget.clear();
     if (!IsInGame()) return s_raw;
     ResolveSpecNetvars();
     if (s_offObsMode < 0 || s_offObsTarget < 0 || g_offLifeState <= 0) return s_raw;
@@ -138,7 +140,7 @@ static const std::vector<SpecEntry>& RawEntries()
         if (target < 1 || target > 64) continue;
         void* pTarget = GetClientEntity(target);
         int targetLife = 1;
-        if (!pTarget || !ReadLife(pTarget, targetLife) || targetLife != 0) continue;
+        if (!pTarget || !ReadLife(pTarget, targetLife)) continue;
 
         SpecPlayerInfo_t pi, ti;
         if (!PlayerInfo(i, pi)) continue;
@@ -157,21 +159,26 @@ static const std::vector<SpecEntry>& RawEntries()
         e.sid           = SteamOf(pi);
         e.targetSid     = SteamOf(ti);
         e.mode          = mode == OBS_CHASE ? "3rd" : "1st";
-        s_raw.push_back(std::move(e));
+        (targetLife == 0 ? s_raw : s_rawDeadTarget).push_back(std::move(e));
     }
     return s_raw;
 }
 
-// botox collect_spectators( out, all_players, keep_hltv ): listed players combo applies unless all_players
-static void Collect(std::vector<SpecEntry>& out, bool allPlayers = false, bool keepHltv = false)
+// botox collect_spectators( out, all_players, keep_hltv ): listed players combo applies unless all_players.
+// keepDeadTarget: also watchers of a dead player (the server keeps a dead target for the death cam / a few s)
+static void Collect(std::vector<SpecEntry>& out, bool allPlayers = false, bool keepHltv = false, bool keepDeadTarget = false)
 {
     out.clear();
     const bool localOnly = !allPlayers && g_specListType == 1;
-    for (const SpecEntry& e : RawEntries()) {
-        if (localOnly && !e.watchingLocal) continue;
-        if (e.hltv && !keepHltv) continue;   // SourceTV sits on the server as a dead player watching everyone
-        out.push_back(e);
-    }
+    const auto add = [&](const std::vector<SpecEntry>& list) {
+        for (const SpecEntry& e : list) {
+            if (localOnly && !e.watchingLocal) continue;
+            if (e.hltv && !keepHltv) continue;   // SourceTV sits on the server as a dead player watching everyone
+            out.push_back(e);
+        }
+    };
+    add(RawEntries());
+    if (keepDeadTarget) add(s_rawDeadTarget);
 }
 
 static void SortByIndex(std::vector<SpecEntry>& v)
@@ -2679,7 +2686,7 @@ static void DrawRequiem(ImDrawList* dl, ImGuiIO& io)
     // donor loop is i < maxClients: the last player slot is never listed
     const int maxClients = g_engine ? VCall<int>(g_engine, 21) : 0;   // IVEngineClient::GetMaxClients (sdk 2013 cdll_int.h)
     std::vector<SpecEntry> entries;
-    Collect(entries, true, true);
+    Collect(entries, true, true, true);   // donor: no bot / SourceTV filter, target only has to exist
     entries.erase(std::remove_if(entries.begin(), entries.end(), [&](const SpecEntry& e) {
         return e.index >= maxClients || (!showTarget && e.targetIndex != focus);
     }), entries.end());
@@ -2780,7 +2787,7 @@ static void DrawPrimordial(ImDrawList* dl, ImGuiIO& io)
     const bool showAll = g_specShowTarget, showMode = g_specBhopMode;
 
     std::vector<SpecEntry> entries;
-    Collect(entries, true, false);   // also resolves the observer netvars
+    Collect(entries, true, false, true);   // also resolves the observer netvars; target only has to exist (0x4018fa14)
 
     // donor view (0x4017f2b0): us; dead and in eye / chase -> the player we watch
     const int localIdx = GetLocalPlayerIndex();
@@ -2806,7 +2813,8 @@ static void DrawPrimordial(ImDrawList* dl, ImGuiIO& io)
         default:            return "";
         }
     };
-    const auto cut = [](const std::string& s) { return s.size() > 18 ? s.substr(0, 18) + "..." : s; };   // 0x4047e3b0, bytes
+    // 0x4047e3b0: > 18 bytes = first 18 + "...", empty = "<blank>"
+    const auto cut = [](const std::string& s) { return s.size() > 18 ? s.substr(0, 18) + "..." : s.empty() ? std::string("<blank>") : s; };
     struct Row { std::string text; bool view; };
     std::vector<Row> rows;
     for (const SpecEntry& e : entries) {
@@ -2822,7 +2830,7 @@ static void DrawPrimordial(ImDrawList* dl, ImGuiIO& io)
     const bool visible = (IsInGame() || g_showMenu) && (n > 0 || g_specAlwaysShow);
     t = ImClamp(t + (visible ? 1.f : -1.f) * io.DeltaTime * 5.f, 0.f, 1.f);
     if (t == 0.f) return;
-    const float e = 0.5f * (float)(sin(((double)t - 0.5) * 3.14159265358979323846) + 1.0);
+    const float e = 0.5f * (float)(sin(((double)t - 0.5) * 3.1415926) + 1.0);   // donor pi = double 3.1415926 (0x40640d88)
 
     const auto size = [&](const std::string& s) { const ImVec2 v = font->CalcTextSizeA(font->FontSize, FLT_MAX, 0.f, s.c_str()); return ImVec2((float)(int)v.x, (float)(int)v.y); };
     const int fh = (int)size("ABCDEF").y;                                     // font + 0xC line height = 13

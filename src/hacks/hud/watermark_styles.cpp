@@ -1598,7 +1598,7 @@ MediaLook Watermark_MediaLook(int style)
     // requiem spotify panel (FUN_100560e0): no box anywhere, title white, artists 180, Tahoma 12 drop shadow
     case 25: return { false, white, IM_COL32(180, 180, 180, 255), 1 };
     // primordial has no music panel: wm chrome box, wm text (220) title, accent artist, font flag 0x80 drop shadow
-    case 26: return { true, IM_COL32(220, 220, 220, 255), accent, 1 };
+    case 26: return { true, IM_COL32(220, 220, 220, 255), ImGui::ColorConvertFloat4ToU32(ImGui::GetStyleColorVec4(ImGuiCol_Accent)), 1 };
     default: return { true, white, accent, 0 };   // style 0: menu accent
     }
 }

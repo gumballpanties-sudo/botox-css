@@ -1769,8 +1769,13 @@ static void BuildFontAtlas()
     g_fontPrimordialRobotoMedium13 = donor(primordial_roboto_medium, sizeof(primordial_roboto_medium), 13.f, 0);
     orElse(g_fontPrimordialRoboto13, g_fontReg); orElse(g_fontPrimordialRobotoMedium13, g_fontPrimordialRoboto13);
     // primordial hud font (create_font 0x40471900, fonts #1 + #5): Tahoma 13 weight 400 flags 0x80 = no FONTFLAG_ANTIALIAS ->
-    // FreeType Monochrome alone (no MonoHinting = FT_LOAD_TARGET_NORMAL hinting), not bold. #1's msjh cjk merge not ported
-    g_fontPrimordialTahoma13 = sys("tahoma.ttf", 13.f, flagged(ImGuiFreeTypeBuilderFlags_Monochrome), cyr);
+    // FreeType Monochrome alone (no MonoHinting = FT_LOAD_TARGET_NORMAL hinting), not bold. #1's msjh cjk merge not ported, but
+    // its range list (0x40ccdf50: latin ext / greek / arabic / thai + cyrillic + vietnamese + the cjk sets' punctuation / kana /
+    // fullwidth) is read from tahoma itself, like the donor: codepoints tahoma lacks are skipped, no atlas cost
+    static const ImWchar kPrimordialRanges[] = { 0x0020, 0x00FF, 0x0100, 0x024F, 0x0300, 0x03FF, 0x0400, 0x052F, 0x0600, 0x06FF,
+        0x0E00, 0x0E7F, 0x1EA0, 0x1EF9, 0x2000, 0x206F, 0x2DE0, 0x2DFF, 0x3000, 0x30FF, 0x31F0, 0x31FF, 0xA640, 0xA69F,
+        0xFF00, 0xFFEF, 0xFFFD, 0xFFFD, 0 };
+    g_fontPrimordialTahoma13 = sys("tahoma.ttf", 13.f, flagged(ImGuiFreeTypeBuilderFlags_Monochrome), kPrimordialRanges);
     orElse(g_fontPrimordialTahoma13, g_fontReg);
     // aventum.dll gui font slot 0 (every menu string): its embedded verdana = stock verdana.ttf (same checksum), 14 px,
     // ImFontConfig FontBuilderFlags 0x200 = Bitmap only. Bitmap matters here: nominal size request, not real-dim

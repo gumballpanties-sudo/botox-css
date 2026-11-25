@@ -17,6 +17,11 @@ void BlurRect(ImDrawList* dl, ImVec2 min, ImVec2 max, float strength, float roun
 // alpha): the boot screen and the menu background blur fade in/out instead of popping.
 void BlurRectFade(ImDrawList* dl, ImVec2 min, ImVec2 max, float strength, float alpha);
 
+// lua render.blur = botox csgo screen_blur_rect_smooth: amount 1 = 34 px radius (blur_plan.h), tint rgb multiplies,
+// tint alpha crossfades over the sharp frame, rounding cuts the corners (hard edge). Reads 3 radii around the rect so
+// its edge blurs in the surroundings; off-screen part skipped. 48 a frame (css paints lua first: panels keep 16 slots).
+void BlurRectSmooth(ImDrawList* dl, ImVec2 min, ImVec2 max, float amount, ImU32 tint, float rounding);
+
 // A blur job's rect moved with the vertices around it (render/dpi.cpp panel scale): if cmd is a
 // blur callback, its rect becomes pivot + (rect - pivot) * scale. Any other cmd: untouched.
 void BlurRect_ScaleJob(const ImDrawCmd& cmd, ImVec2 pivot, float scale);

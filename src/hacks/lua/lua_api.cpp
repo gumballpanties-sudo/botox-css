@@ -61,6 +61,7 @@
 #include "../misc/killeffects.h"    // KillEffects_DispatchParticle/_Sparks -- fx.particle/fx.sparks
 #include "../visuals/esp_preview.h" // EspPreview::AnimRoot* -- model:animate / entity:animate roots
 #include "../hud/gif_tex.h"          // GifTex_Get / _Frame -- render.image
+#include "../screen/blur_rect.h"     // BlurRectSmooth -- render.blur
 
 #include "lua_api.h"
 #include "lua_image.h"
@@ -730,6 +731,17 @@ namespace
 
 		if (const ImTextureID texture = GifTex_Frame(it->second.m_gif, ImGui::GetTime()))
 			ImGui::GetBackgroundDrawList()->AddImageRounded(texture, ImVec2(x, y), ImVec2(x + w, y + h), ImVec2(0.f, 0.f), ImVec2(1.f, 1.f), color, rounding);
+		return 0;
+	}
+
+	// blurs what is drawn under the rect so far (game, vgui hud, earlier draws of this and older scripts: lua paints
+	// before every other overlay here). strength 1 = 34 px radius, 0..3; color tints + fades it, alpha 0 = skipped
+	int l_render_blur(lua_State* L)
+	{
+		require_paint(L);
+		const float x1 = check_float(L, 1), y1 = check_float(L, 2), x2 = check_float(L, 3), y2 = check_float(L, 4);
+		BlurRectSmooth(ImGui::GetBackgroundDrawList(), ImVec2(std::min(x1, x2), std::min(y1, y2)), ImVec2(std::max(x1, x2), std::max(y1, y2)),
+		               std::clamp(opt_float(L, 5, 1.f), 0.f, 3.f), opt_color(L, 6), std::max(0.f, opt_float(L, 7, 0.f)));   // 0 first: nan -> 0
 		return 0;
 	}
 
@@ -2516,7 +2528,7 @@ void n_lua_api::open(lua_State* L)
 		                                { "line", l_render_line }, { "rect", l_render_rect }, { "rect_filled", l_render_rect_filled },
 		                                { "gradient", l_render_gradient }, { "circle", l_render_circle }, { "circle_filled", l_render_circle_filled },
 		                                { "triangle", l_render_triangle }, { "poly", l_render_poly }, { "world_to_screen", l_render_world_to_screen },
-		                                { "load_image", l_render_load_image }, { "image", l_render_image },
+		                                { "load_image", l_render_load_image }, { "image", l_render_image }, { "blur", l_render_blur },
 		                                { nullptr, nullptr } };
 	add_table(L, "render", render);
 
