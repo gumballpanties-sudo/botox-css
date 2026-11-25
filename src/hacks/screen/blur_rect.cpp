@@ -399,6 +399,8 @@ static void BlurLuaCallback(const ImDrawList*, const ImDrawCmd*)
             dev->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, q, sizeof(BlurVert));
         }
     }
+    else
+        dev->ColorFill(s_luaSurf[1], nullptr, D3DCOLOR_ARGB(0, 0, 0, 0));   // rects already recorded: see-through, not stale
 
     BlurRestore(dev, st);
 }
