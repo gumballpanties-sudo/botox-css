@@ -131,14 +131,14 @@ void RenderPoints()
     constexpr float kInactivity = 3.f, kFade = 0.35f, kQuickAnim = 0.25f, kReveal = 0.22f;
     constexpr float kAlphaOut = 0.08f, kAlphaIn = 0.08f, kSlide = 50.f, kGap = 6.f;
     constexpr float kSpring = 200.f, kDamping = 40.f, kImpulse = 6.f;
-    constexpr float kBob = 3.75f, kDropIn = 17.f;
+    constexpr float kBob = 3.75f, kRowBob = 2.f, kDropIn = 17.f;
 
     static int shown = 0;
     static unsigned seenEvents = 0;
     static float displayTimer = 0.f, fadeTimer = 0.f, animTimer = 0.f, revealTimer = 0.f, resetTimer = 0.f;
     static bool fading = false, animActive = false, revealing = false;
     static float offset = 0.f, offsetVel = 0.f, bobPhase = 0.f, drop = 0.f, trail = 0.f;
-    static float rowAnim[PTS_PIXEL_SURF_RIDE] = {};
+    static float rowAnim[PTS_PIXEL_SURF_RIDE] = {}, rowBob[PTS_PIXEL_SURF_RIDE] = {};
 
     const auto reset = [&] {
         shown = 0;
@@ -225,7 +225,8 @@ void RenderPoints()
 
     drop += (0.f - drop) * std::min(8.5f * dt, 1.f);
 
-    bobPhase = std::fmod(bobPhase + dt * std::clamp(g_ptsBobSpeed, 0.1f, 10.f) * 3.6f, 6.2831853f);
+    const float bobRate = std::clamp(g_ptsBobSpeed, 0.1f, 10.f) * 3.6f;
+    bobPhase = std::fmod(bobPhase + dt * bobRate, 6.2831853f);
     const float bob = std::sin(bobPhase) * kBob;
 
     if (fading && fadeTimer >= kFade && alpha <= 0.001f)
@@ -316,6 +317,9 @@ void RenderPoints()
     for (int n = 0; n < count; ++n)
     {
         const int i = order[n];
+        // own bob per row: start phase + rate from trick index, rows never lock step
+        if (rowAnim[i] <= 0.f) rowBob[i] = i * 2.4f;
+        rowBob[i] = std::fmod(rowBob[i] + dt * bobRate * (0.8f + 0.05f * i), 6.2831853f);
         rowAnim[i] = std::min(rowAnim[i] + dt * speed / kReveal, 1.f);
         const float ta = easeOut(rowAnim[i]);
         const float a  = groupAlpha * ta;
@@ -328,7 +332,7 @@ void RenderPoints()
         const float gainW      = font->CalcTextSizeA(rowSize, FLT_MAX, 0.f, gain.c_str()).x;
 
         float rx = std::floor(right - (nameSize.x + space + multW + gainW) + (1.f - ta) * 12.f);
-        const float ry = std::floor(rowY);
+        const float ry = std::floor(rowY + std::sin(rowBob[i]) * kRowBob);
 
         put(kRowNames[i], rx, ry, rowSize, tint(255, 255, 255, 255.f), tint(ar, ag, ab, 150.f));
         rx += nameSize.x + space;
