@@ -434,6 +434,8 @@ static void Page_VisualsWorld()
                     ImGui::SliderFloat("env strength##weapon sheen", &g_wpnSheenEnv, 0.f, 10.f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
             }, ImVec2(220.f, -1.f));
 
+        UnitC_Menu_viewmodel_glow();   // botox 11-26 viewmodel glow / stencil, after weapon sheen like botox
+
         ImGui::Checkbox("weapon sway", &g_vmSwayEnable);
         if (g_vmSwayEnable)
             ImGui::OptionPopup("weapon sway settings", [&]() {

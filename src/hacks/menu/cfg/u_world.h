@@ -102,6 +102,34 @@ inline float g_wpnSheenWidth = 0.3f;                               // m_weapon_s
 inline bool  g_wpnSheenNormalBlend = false;                        // m_weapon_sheen_normal -- blend with stock white tint instead of replacing it
 inline float g_wpnSheenEnv = 5.f;                                  // m_weapon_sheen_env (0..10) -- 10 = full tint strength
 
+// botox m_viewmodel_glow / m_viewmodel_stencil (aim/chams.cpp ModelGlow_Viewmodel). CS:S v_ model = gun +
+// hands in one mesh (unitC_menu.cpp viewmodel chams note): one part, botox's weapon colours
+inline bool  g_vmGlow = false;                                     // m_viewmodel_glow
+inline float g_vmGlowColor[4]      = { 224 / 255.f, 175 / 255.f, 86 / 255.f, 153 / 255.f };
+inline float g_vmGlowOuterColor[4] = { 0.f, 0.f, 0.f, 1.f };
+inline bool  g_vmGlowGradient = false;
+inline float g_vmGlowGradientInner = 60.f;
+inline bool  g_vmGlowNormalBlend = false;
+inline float g_vmGlowThickness = 15.f;
+inline bool  g_vmGlowWave = false;
+inline float g_vmGlowWaveColor[4] = { 1.f, 1.f, 1.f, 1.f };
+inline float g_vmGlowWaveSpeed = 0.5f;
+inline float g_vmGlowWaveSize = 0.35f;
+inline float g_vmGlowWaveStrength = 0.8f;
+inline float g_vmGlowWaveAngle = 0.f;
+inline bool  g_vmGlowPulse = false;
+inline float g_vmGlowPulseSpeed = 1.f;
+inline float g_vmGlowPulseMin = 35.f;
+inline bool  g_vmStencil = false;                                  // m_viewmodel_stencil
+inline float g_vmStencilColor[4] = { 1.f, 1.f, 1.f, 1.f };
+inline float g_vmStencilThickness = 1.5f;
+inline bool  g_vmStencilWave = false;
+inline float g_vmStencilWaveColor[4] = { 1.f, 1.f, 1.f, 1.f };
+inline float g_vmStencilWaveSpeed = 0.5f;
+inline float g_vmStencilWaveSize = 0.35f;
+inline float g_vmStencilWaveStrength = 0.8f;
+inline float g_vmStencilWaveAngle = 0.f;
+
 // ---- removals group (botox variables.h :710-730) ----
 // m_disable_post_processing = unit screen's g_sfxDisablePostProcessing (u_screen.h, world_fx.cpp)
 inline bool  g_wdNo3dSky = false;                                 // m_remove_3d_skybox

@@ -1075,15 +1075,10 @@ void CEsp::DrawWorld(CCSPlayer* pLocal)
 		auto pEnt = pClient ? pClient->As<CBaseEntity>() : nullptr;
 		if (!pEnt || pEnt->IsDormant())
 			continue;
-		auto pClass = pEnt->GetClientClass();
-		// a dropped weapon is a C_WeaponCSBase with no owner (CBaseCombatWeapon::m_hOwner unset);
-		// CSS_WeaponIDFromClientClassName matches every DT_Weapon*/DT_HEGrenade/etc string.
-		const CSWeaponID eDroppedId = pClass ? CSS_WeaponIDFromClientClassName(pClass->GetName()) : WEAPON_NONE;
+		// css.h CSS_DroppedWeaponID: a C_WeaponCSBase with no owner, the same set the dropped glow stamps
+		const CSWeaponID eDroppedId = CSS_DroppedWeaponID(pEnt);
 		if (eDroppedId == WEAPON_NONE)
 			continue;
-		auto pWpn = reinterpret_cast<CWeaponCSBase*>(pEnt);
-		if (pWpn->m_hOwner().Get() != nullptr)
-			continue;   // held, not dropped
 
 		SBox b;
 		if (!ScreenBox(pEnt->GetAbsOrigin(), pEnt->m_vecMins(), pEnt->m_vecMaxs(), b) || b.w <= 0 || b.h <= 0)

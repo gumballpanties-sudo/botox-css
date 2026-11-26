@@ -281,6 +281,15 @@ public:
 	}
 };
 
+// a weapon on the ground: any DT_Weapon* class with no owner (CBaseCombatWeapon::m_hOwner unset).
+// aim/esp.cpp dropped weapons esp + aim/chams.cpp dropped weapon glow: one set. WEAPON_NONE = not one
+inline CSWeaponID CSS_DroppedWeaponID(CBaseEntity* pEnt)
+{
+	auto pClass = pEnt ? pEnt->GetClientClass() : nullptr;
+	const CSWeaponID id = pClass ? CSS_WeaponIDFromClientClassName(pClass->GetName()) : WEAPON_NONE;
+	return id != WEAPON_NONE && !reinterpret_cast<CWeaponCSBase*>(pEnt)->m_hOwner().Get() ? id : WEAPON_NONE;
+}
+
 // ---- C_Team (c_team.cpp, DT_Team, IMPLEMENT_CLIENTCLASS_DT_NOBASE -- its OWN
 // m_iTeamNum/m_iScore, NOT CBaseEntity's generic m_iTeamNum). Server class name is "CCSTeam" on
 // this binary (AIM3, verified live-binary ClientClass::m_pNetworkName, 11-03), not the community

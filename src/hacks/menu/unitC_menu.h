@@ -5,3 +5,4 @@
 void UnitC_Menu_visuals_esp();
 void UnitC_Menu_visuals_world();
 void UnitC_Menu_visuals_chams();
+void UnitC_Menu_viewmodel_glow();   // visuals > world > viewmodel: "viewmodel glow" + "viewmodel stencil" rows

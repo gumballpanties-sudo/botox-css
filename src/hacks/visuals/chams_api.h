@@ -31,6 +31,12 @@ void Glow_LevelUnload();   // no-op: RTs live across maps, remade only on a back
 void Glow_Render();        // screenfx.cpp DoPostScreenSpaceEffects, before the original: stencil + halo pass
 bool Glow_Rendering();     // true inside Glow_Render's model draws: h_DrawModelExecute passes straight through
 
+// ---- model glow (aim/chams.cpp, botox model_glow.cpp): viewmodel glow / stencil + dropped weapon glow ----
+bool ModelGlow_ViewmodelWanted();          // visuals > world > viewmodel glow or stencil on
+void ModelGlow_ViewmodelStamp(bool bOn);   // visuals.cpp h_DrawModelExecute: stencil ref on around a live gun draw, off after
+void ModelGlow_Viewmodel();                // screenfx.cpp ViewDrawFade (after DrawViewModels): the gun's pass, once a frame
+void ModelGlow_Dropped();                  // screenfx.cpp DoPostScreenSpaceEffects after Glow_Render: stamp + pass
+
 // ---- esp preview (hacks/visuals/esp_preview.cpp) ----
 // ITexture*, null if Glow_LevelInit's preview target creation failed. Plain void*: chams_api.h stays
 // engine-type-free, same as the rest of this header.

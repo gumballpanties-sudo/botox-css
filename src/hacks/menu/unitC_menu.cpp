@@ -502,6 +502,60 @@ static void UnitC_BombRows()
         }, ImVec2(220.f, -1.f));
 }
 
+// botox 11-26 menu_tab_visuals.cpp "viewmodel glow" / "viewmodel stencil" (aim/chams.cpp ModelGlow_Viewmodel).
+// botox has weapon / gloves / sleeves rows; the CS:S v_ model is gun + hands in one mesh (see the viewmodel
+// chams note above), so one colour each -- botox's weapon row and defaults
+void UnitC_Menu_viewmodel_glow()
+{
+    ImGui::Checkbox("viewmodel glow", &g_vmGlow);
+    if (g_vmGlow)
+        ImGui::OptionPopup("viewmodel glow settings", [&]() {
+            const bool gradient = g_vmGlowGradient;
+            ImGui::ColorRow(gradient ? "viewmodel inner##viewmodel glow color" : "viewmodel##viewmodel glow color", g_vmGlowColor, kPickerAlpha);
+            if (gradient)
+                ImGui::ColorRow("viewmodel outer##viewmodel glow outer color", g_vmGlowOuterColor, kPickerAlpha);
+
+            ImGui::Checkbox("accent wave##viewmodel glow", &g_vmGlowWave);
+            if (g_vmGlowWave) {
+                ImGui::ColorRow("wave color##viewmodel glow wave", g_vmGlowWaveColor, kPickerNoAlpha);
+                ImGui::SliderFloat("wave speed##viewmodel glow wave", &g_vmGlowWaveSpeed, 0.05f, 4.f, "%.2fx", ImGuiSliderFlags_AlwaysClamp);
+                ImGui::SliderFloat("wave size##viewmodel glow wave", &g_vmGlowWaveSize, 0.05f, 2.f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+                ImGui::SliderFloat("wave strength##viewmodel glow wave", &g_vmGlowWaveStrength, 0.f, 1.f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+                ImGui::SliderFloat("wave angle##viewmodel glow wave", &g_vmGlowWaveAngle, -180.f, 180.f, "%.0f deg", ImGuiSliderFlags_AlwaysClamp);
+            }
+
+            ImGui::Checkbox("edge pulse##viewmodel glow", &g_vmGlowPulse);
+            if (g_vmGlowPulse) {
+                ImGui::SliderFloat("pulse speed##viewmodel glow pulse", &g_vmGlowPulseSpeed, 0.1f, 4.f, "%.1fx", ImGuiSliderFlags_AlwaysClamp);
+                ImGui::SliderFloat("pulse min##viewmodel glow pulse", &g_vmGlowPulseMin, 0.f, 95.f, "%.0f%%", ImGuiSliderFlags_AlwaysClamp);
+            }
+
+            ImGui::Checkbox("normal blending##viewmodel glow", &g_vmGlowNormalBlend);
+            if (g_vmGlowNormalBlend)
+                ImGui::SliderFloat("thickness##viewmodel glow", &g_vmGlowThickness, 2.f, 30.f, "%.0f px", ImGuiSliderFlags_AlwaysClamp);
+
+            ImGui::Checkbox("gradient##viewmodel glow", &g_vmGlowGradient);
+            if (gradient)
+                ImGui::SliderFloat("inner size##viewmodel glow gradient", &g_vmGlowGradientInner, 0.f, 100.f, "%.0f%%", ImGuiSliderFlags_AlwaysClamp);
+        }, ImVec2(220.f, -1));
+
+    ImGui::Checkbox("viewmodel stencil", &g_vmStencil);
+    if (g_vmStencil)
+        ImGui::OptionPopup("viewmodel stencil settings", [&]() {
+            ImGui::ColorRow("viewmodel##viewmodel stencil color", g_vmStencilColor, kPickerAlpha);
+            ImGui::SliderFloat("thickness##viewmodel stencil", &g_vmStencilThickness, 0.5f, 8.f, "%.1f px", ImGuiSliderFlags_AlwaysClamp);
+
+            ImGui::Checkbox("accent wave##viewmodel stencil", &g_vmStencilWave);
+            if (g_vmStencilWave) {
+                ImGui::ColorRow("wave color##viewmodel stencil wave", g_vmStencilWaveColor, kPickerNoAlpha);
+                ImGui::SliderFloat("wave speed##viewmodel stencil wave", &g_vmStencilWaveSpeed, 0.05f, 4.f, "%.2fx", ImGuiSliderFlags_AlwaysClamp);
+                ImGui::SliderFloat("wave size##viewmodel stencil wave", &g_vmStencilWaveSize, 0.05f, 2.f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+                ImGui::SliderFloat("wave strength##viewmodel stencil wave", &g_vmStencilWaveStrength, 0.f, 1.f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+                ImGui::SliderFloat("wave angle##viewmodel stencil wave", &g_vmStencilWaveAngle, -180.f, 180.f, "%.0f deg", ImGuiSliderFlags_AlwaysClamp);
+            }
+        }, ImVec2(220.f, -1));
+}
+
 void UnitC_Menu_visuals_world()
 {
     ImGui::Checkbox("dropped weapons", &g_esxDropped);
@@ -524,6 +578,12 @@ void UnitC_Menu_visuals_world()
             if (g_esxDroppedIcon) {
                 ImGui::SameLine();
                 ImGui::ColorRow("##dropped weapons icon color", g_esxDroppedIconColor, kPickerAlpha);
+            }
+            // botox 11-26 "glow##dropped weapons" (aim/chams.cpp ModelGlow_Dropped)
+            ImGui::Checkbox("glow##dropped weapons", &g_esxDroppedGlow);
+            if (g_esxDroppedGlow) {
+                ImGui::ColorRow("glow visible##dropped weapons glow vis color", g_esxDroppedGlowVisColor, kPickerAlpha);
+                ImGui::ColorRow("glow invisible##dropped weapons glow invis color", g_esxDroppedGlowInvisColor, kPickerAlpha);
             }
         }, ImVec2(220.f, -1));
 

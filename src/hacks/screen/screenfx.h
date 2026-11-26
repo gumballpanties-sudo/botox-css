@@ -67,6 +67,7 @@ bool ScreenFx_CallQueueWorking();
 // MAIN thread: replay fn on the render thread at this point of the frame. false = not queued
 // (mat_queue_mode 0, or no queue) -- caller draws directly. fn = fake CFunctor, never freed.
 bool ScreenFx_QueueFunctor(void* fn);
+bool ScreenFx_ViewDrawFadeHooked();   // IVRenderView::ViewDrawFade hook in: the viewmodel glow's read point exists
 // IMatRenderContext::Flush(false): buffered engine primitives out to d3d (queued under multicore).
 bool ScreenFx_FlushRenderContext();
 

@@ -13,10 +13,31 @@
 
 struct PlayerStencilCapsule { float a[2], b[2], sigma[2]; };   // ndc endpoints, sigma in ndc y units
 
+// one mask pass: px whose stencil passes (D3DCMPFUNC func, ref, test mask) write 1 into channels (D3DCOLORWRITEENABLE
+// bits, r g b = class 1 2 3); zero = clear them there instead. d3d values as plain ints: the aim TU includes this
+struct PlayerStencilFill { unsigned func = 3 /*D3DCMP_EQUAL*/, ref = 0, channels = 1 /*RED*/; bool zero = false; unsigned mask = 0xFFFFFFFFu; };
+
+// wipe a source's refs right after its mask read: where (stencil & test) == ref the write bits go to 0, every
+// other bit stays (botox clear_t). write 0 = no clear (players: the engine-side refs are theirs to leave)
+struct PlayerStencilClear { unsigned test = 0, ref = 0, write = 0; };
+
+// model glow's ref band (aim/chams.cpp kRef*: 0x50..0x57 in the low 7 bits). A pass that never reaches Draw
+// (target / depth-stencil mismatch, build fail) skips its clear: the players' mask zeroes red over this band
+// (kPlayerFills) so a leftover gun never reads as a visible player. Players' own refs (1, 2) never fall in it
+constexpr unsigned kModelBandTest = 0x78, kModelBandRef = 0x50;
+
 struct PlayerStencilSettings
 {
 	static constexpr int kMaxCapsules = 768;   // 32 players x the TF2 hitbox set (17-18) + headroom
 	bool  outline = false, glow = false, inner = false, innerBones = false;
+	// model glow (aim/chams.cpp ModelGlow_*): own mask program, never touches PlayerStencil_GlowLive.
+	// nFills 0 = the players' program (player_stencil.cpp kPlayerFills: red 2..127, green 1)
+	bool  model = false;
+	static constexpr int kMaxFills = 4;
+	PlayerStencilFill fills[kMaxFills] = {};
+	int   nFills = 0;
+	PlayerStencilClear clear = {};
+	float third[4] = {}, glowThird[4] = {}, glowThirdOuter[4] = {};   // c80 c81 c82: class 3 outline / glow inner / outer
 	float visible[4] = {}, invisible[4] = {};                  // c1 c2: stencil colours
 	float thickness = 1.5f;                                    // c0.w, c0.z = ceil
 	float glowVisible[4] = {}, glowInvisible[4] = {};          // c3 c4
@@ -45,6 +66,16 @@ struct PlayerStencilSettings
 void PlayerStencil_Submit(const PlayerStencilSettings& s, bool bPreview = false);
 // botox glow_enabled(): our full-res glow drew last time -> the material system halo stays off.
 bool PlayerStencil_GlowLive();
+// every shader built on the current device: a pass submitted now runs (and clears what it reads). Model glow
+// stamps nothing until this is true -- nothing would read or clear the refs. The shaders are only made inside a
+// queued pass (render thread), so a source that wants them first queues PlayerStencil_Warm.
+bool PlayerStencil_Ready();
+void PlayerStencil_Warm();   // main thread: queue a shader-only pass (no mask, no draw)
+// the last model glow pass reached Draw (so it cleared its refs). False after a pass that did not (target /
+// depth-stencil mismatch, build fail): stamp nothing, queue PlayerStencil_Probe at the read point each frame
+// until its checks (shaders + drawable, no draw) pass again
+bool PlayerStencil_ModelLive();
+void PlayerStencil_Probe();
 // shaders refused / targets failed for good: outline + inner glow off, glow back to the halo.
 // Device-level (shaders are shared by both instances), so this covers the preview path too.
 bool PlayerStencil_Failed();

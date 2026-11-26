@@ -1560,6 +1560,13 @@ static void __fastcall h_ViewDrawFade(void* thisptr, unsigned char* color, void*
 {
     MiscHookGuard _g;
 
+    // viewmodel glow / stencil (aim/chams.cpp ModelGlow_Viewmodel) BEFORE the fade: an env_fade / ScreenFade must
+    // cover the gun's outline too. The gun's stencil refs are in from DrawViewModels (viewrender.cpp:2160), the
+    // fade writes no stencil, engine post (tonemap stencil) is still to come. Once a frame (its own guard): the
+    // first call is the main fade, PerformScreenOverlay calls this again
+    if (!g_eject && !RearMirror_Drawing())
+        ModelGlow_Viewmodel();
+
     o_ViewDrawFade(thisptr, color, material);
 
     if (RearMirror_Drawing())
@@ -1570,6 +1577,9 @@ static void __fastcall h_ViewDrawFade(void* thisptr, unsigned char* color, void*
     if (!g_eject && ((g_dofEnable && !g_dofViewmodelSharp) || (g_fbEnable && g_fbViewmodel) || g_bloomEnable))
         FxViewmodelPassDispatch();
 }
+
+// aim/chams.cpp ModelGlow_ViewmodelWanted: no hook = nothing would ever read the gun's stencil refs
+bool ScreenFx_ViewDrawFadeHooked() { return o_ViewDrawFade != nullptr; }
 
 // ==== mat_queue_mode ================================================================
 // WHY THIS EXISTS, and it is measured, not assumed (dih, 2026-09-06).
@@ -1891,6 +1901,10 @@ static bool __fastcall h_DoPostScreenSpaceEffects(void* thisptr, const void* set
     // Player glow + stencil (aim/chams.cpp) over every pass above (botox: glow after the passes).
     // The passes restore the depth-stencil, so the marks still z test vs the scene. Material-system
     // calls only, queued mode fine. (Chams_RenderCloaked removed: no Spy-cloak concept in CS:S.)
+    // dropped weapon glow (aim/chams.cpp ModelGlow_Dropped): stamp, read, clear, all before the players stamp their
+    // refs below (botox: dropped before the engine glow) -- the players' refs never sit under a gun stamp
+    if (!g_eject) ModelGlow_Dropped();
+
     if (!g_eject) Glow_Render();
 
     const bool ret = o_DoPostSSE(thisptr, setup);

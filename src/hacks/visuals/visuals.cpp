@@ -13,6 +13,7 @@
 #include "world_fx2.h"    // WorldFx2_Tick/_OnFindMaterial -- unit D2: dlight, sun angle, tints
 #include "mc_world.h"     // MCWorld_OnSkyBoxDrawn -- minecraft sky behind the 2D sky draw
 #include "rear_mirror.h"  // RearMirror_Drawing -- the back view draws plain models, no mc sky
+#include "esp_preview.h"  // EspPreview::Drawing -- the preview's fake gun never stamps the viewmodel glow ref
 #include "../misc/game_extras.h"   // ChatTranslator_OnUserMessage -- unit game, DispatchUserMessage
 #include "../misc/game_pure.h"     // n_game::SayMsg/ParseSayText(2)/PickChatLine -- pure parsing, no SDK types
 #include "../aim/css_bridge.h"     // CssBridge_DispatchChat (SDK2/BRIDGE 11-03)
@@ -1046,11 +1047,31 @@ static bool Lua_DrawModel(void* rcx, const void* pState, const void* pInfo, cons
     return true;
 }
 
+// viewmodel glow / stencil (aim/chams.cpp ModelGlow_*): the live gun stamps its stencil ref for every pass
+// that draws it (chams layers, sheen, lua tint), off after. Not depth passes, the mirror, the glow's own
+// silhouettes or the esp preview. CS:S has no viewmodel trail ghosts to keep out.
+static bool ViewmodelStampWanted(const void* pInfo)
+{
+    if (g_eject || !pInfo || !ModelGlow_ViewmodelWanted() || RearMirror_Drawing() || Glow_Rendering() || EspPreview::Drawing())
+        return false;
+    const uint8_t* info = static_cast<const uint8_t*>(pInfo);
+    if (*reinterpret_cast<const int*>(info + 0x40) & (0x08000000 | 0x40000000))   // chams.cpp kDepthPassFlags (ssao / shadow depth)
+        return false;
+    const void* pMdl = *reinterpret_cast<const void* const*>(info + 0x20);
+    if (reinterpret_cast<uintptr_t>(pMdl) < 0x10000)
+        return false;
+    LazyModelName nm; nm.mdl = pMdl;
+    return ViewmodelDrawKind(pMdl, nm, *reinterpret_cast<const int*>(info + 0x44)) != 0;
+}
+
 void __fastcall h_DrawModelExecute(void* rcx, const void* pState, const void* pInfo, const void* pBones)
 {
     MiscHookGuard _g;
     if (Lua_DrawModel(rcx, pState, pInfo, pBones)) return;
+    const bool stamp = ViewmodelStampWanted(pInfo);
+    if (stamp) ModelGlow_ViewmodelStamp(true);
     h_DrawModelExecute_impl(rcx, pState, pInfo, pBones);
+    if (stamp) ModelGlow_ViewmodelStamp(false);
 }
 
 // ==== Weather (CPrecipitation, rain=precipType 0, snow=precipType 1) ================

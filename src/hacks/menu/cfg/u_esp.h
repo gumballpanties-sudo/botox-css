@@ -44,6 +44,9 @@ inline bool  g_esxDroppedName = false;
 inline float g_esxDroppedNameColor[4] = { 1.f, 1.f, 1.f, 1.f };
 inline bool  g_esxDroppedIcon = false;                                  // m_dropped_weapons_icon
 inline float g_esxDroppedIconColor[4] = { 1.f, 1.f, 1.f, 1.f };
+inline bool  g_esxDroppedGlow = false;                                  // m_dropped_weapons_glow (aim/chams.cpp ModelGlow_Dropped)
+inline float g_esxDroppedGlowVisColor[4]   = { 1.f, 1.f, 1.f, 153 / 255.f };
+inline float g_esxDroppedGlowInvisColor[4] = { 114 / 255.f, 155 / 255.f, 221 / 255.f, 153 / 255.f };
 
 inline bool  g_esxThrown = false;                                       // m_thrown_objects
 inline bool  g_esxThrownName = false;
